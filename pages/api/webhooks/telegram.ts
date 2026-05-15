@@ -78,7 +78,7 @@ async function runScan(chatId: number | string, preset: string, botToken: string
       body: JSON.stringify({
         chains,
         sourceTypes: ['onchain'],
-        minimumScore: 7,
+        minimumScore: 5,
         pageSize: 10,
         manualSignals: [],
       }),

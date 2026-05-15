@@ -84,7 +84,8 @@ Pain Point: ${context.painPoint}
 Target Profile:
 - Username: @${profile.username}
 - Score: ${profile.score}/100
-- Tags: ${profile.tags.join(', ')}
+- Role: ${profile.role} [${profile.priority}]
+- Signals: ${profile.signals.join(', ')}
 - Bio: ${profile.bio}
 
 Why is this person a good target for outreach to ${context.projectName}?
@@ -180,7 +181,7 @@ function formatContextForQA(context: QAContext): string {
     lines.push(`*Top Target Profiles:*`)
     for (const profile of context.targetAudiences.slice(0, 3)) {
       lines.push(
-        `  - @${profile.username}: ${profile.tags.join(', ')} (${profile.score}pts)`
+        `  - @${profile.username}: ${profile.role} [${profile.priority}] (${profile.score}pts)`
       )
     }
   }

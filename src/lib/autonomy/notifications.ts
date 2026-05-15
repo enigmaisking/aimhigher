@@ -213,8 +213,8 @@ export async function dispatchDM(
   message: string,
   preferredPlatform: 'x' | 'telegram'
 ): Promise<{ ok: boolean; platform?: string; error?: string }> {
-  // Telegram is always priority when available
-  if (lead.telegramHandle) {
+  // Respect preferred platform when both handles are available
+  if (preferredPlatform === 'telegram' && lead.telegramHandle) {
     const tg = await sendTelegram(lead.telegramHandle, message)
     if (tg.ok) return { ok: true, platform: 'telegram' }
   }

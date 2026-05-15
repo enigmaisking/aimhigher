@@ -51,6 +51,7 @@ interface Project {
   telegramHandle?: string
   websiteUrl?: string
   discordUrl?: string
+  email?: string
 }
 
 interface LeadSource {
@@ -328,6 +329,7 @@ interface ScrapedSocialLinks {
   twitter?: string
   telegram?: string
   discord?: string
+  email?: string
 }
 
 async function scrapeWebsiteForSocialLinks(websiteUrl: string): Promise<ScrapedSocialLinks> {
@@ -380,6 +382,17 @@ async function scrapeWebsiteForSocialLinks(websiteUrl: string): Promise<ScrapedS
       }
     }
 
+    // Match email addresses
+    const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
+    const emailMatch = html.match(emailPattern)
+    if (emailMatch) {
+      // Filter out common non-contact emails
+      const contactEmail = emailMatch.find(
+        e => !e.includes('example.com') && !e.includes('.png') && !e.includes('.jpg') && !e.includes('.css')
+      )
+      if (contactEmail) links.email = contactEmail
+    }
+
     return links
   } catch {
     return {}
@@ -409,26 +422,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const liveProjects = await gatherGeckoSignals(chains.length ? chains : DEFAULT_CHAINS)
 
-  // Before filtering, scrape websites for projects missing X or Telegram
-  // This catches social links from the project website that GeckoTerminal missed
+  // Only scrape websites for projects missing ALL social links
+  // Projects that already have X, Telegram, or Discord skip scraping entirely
   const scrapePromises = liveProjects.map(async (p) => {
-    if (!p.twitterHandle && !p.telegramHandle && p.websiteUrl) {
+    const hasSocial = p.twitterHandle || p.telegramHandle || p.discordUrl
+    if (!hasSocial && p.websiteUrl) {
       const scraped = await scrapeWebsiteForSocialLinks(p.websiteUrl)
-      if (scraped.twitter && !p.twitterHandle) p.twitterHandle = scraped.twitter
-      if (scraped.telegram && !p.telegramHandle) p.telegramHandle = scraped.telegram
-      if (scraped.discord && !p.discordUrl) p.discordUrl = scraped.discord
+      if (scraped.twitter) p.twitterHandle = scraped.twitter
+      if (scraped.telegram) p.telegramHandle = scraped.telegram
+      if (scraped.discord) p.discordUrl = scraped.discord
+      if (scraped.email) p.email = scraped.email
     }
   })
   await Promise.all(scrapePromises)
   console.log(`[Scout] Website scrape fallback completed for ${liveProjects.length} projects`)
 
-  // Filter: only keep projects with X or Telegram link, OR a website to check
-  // Projects with no X, no Telegram, AND no website are excluded as leads
+  // Include projects with social links OR email as fallback
+  // Projects with no reachable contact are excluded
   const projectsWithSocial: Project[] = []
   const projectsNoSocial: Project[] = []
 
   for (const p of liveProjects) {
-    if (p.twitterHandle || p.telegramHandle || p.websiteUrl) {
+    if (p.twitterHandle || p.telegramHandle || p.discordUrl || p.email) {
       projectsWithSocial.push(p)
     } else {
       projectsNoSocial.push(p)
@@ -462,6 +477,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         telegramHandle: project.telegramHandle || null,
         websiteUrl: project.websiteUrl || null,
         discordUrl: project.discordUrl || null,
+        email: project.email || null,
         sources,
         scoreBreakdown,
         confidence: Number((scoreBreakdown.confidence / 1.5).toFixed(2)),

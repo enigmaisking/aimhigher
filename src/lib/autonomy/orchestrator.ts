@@ -427,28 +427,57 @@ async function handleEnrichmentAction(
 ): Promise<{ ok: boolean; responseText?: string }> {
   const lead = getCachedLead(leadId)
 
-  // Group join confirmation → run profile filter + generate drafts
+  // Group join confirmation → fetch members → run profile filter → generate drafts
   if (action === 'enrich_group_confirmed') {
     console.log(`[Orchestrator] Enrichment: group join confirmed for ${leadId}`)
     try {
       const { handleHITLGroupConfirmation } = await import('./lead-enrichment-handler')
       const { runProfileFilter } = await import('./profile-filter-runner')
       const { generateFullDraft } = await import('./draft-generator')
-      const { sendDraftForApproval, sendEnrichmentComplete } = await import('./telegram-client')
+      const { sendDraftForApproval, fetchGroupMembers } = await import('./telegram-client')
+      const { processScanResults } = await import('../profile-filter')
 
       const { getCachedContext } = await import('./lead-enrichment-handler')
       const context = getCachedContext(leadId)
-      let groupTitle = 'community'
+      let groupId = 'community'
 
       if (context) {
         const { extractTelegramGroup } = await import('./geckoterminal-enrich')
         const tgLink = context.socialLinks?.telegram || null
         const extracted = extractTelegramGroup(tgLink)
-        if (extracted) groupTitle = extracted
+        if (extracted) groupId = extracted
       }
 
-      await handleHITLGroupConfirmation(leadId, groupTitle)
-      const filterResult = await runProfileFilter(leadId, 0, groupTitle, [])
+      await handleHITLGroupConfirmation(leadId, groupId)
+
+      // Fetch actual Telegram group members
+      const groupData = await fetchGroupMembers(groupId)
+      const tgProfiles = groupData.profiles.map((m) => ({
+        userId: m.userId,
+        username: m.username,
+        firstName: m.firstName,
+        lastName: m.lastName,
+        bio: m.bio || '',
+        isAdmin: m.isAdmin,
+        isBot: m.isBot,
+        isPremium: m.isPremium,
+        hasLinkedX: /twitter\.com|x\.com/i.test(m.bio || ''),
+        messageFrequency: m.isAdmin ? 60 : 0,
+        groupId: 0,
+        groupTitle: groupData.groupTitle,
+      }))
+
+      // Process through profile filter to identify + draft for high-value targets
+      const { highValue } = processScanResults({
+        projectName: context?.projectName || lead?.project_name || leadId,
+        chain: context?.chain || lead?.chain || '',
+        groupId: 0,
+        groupTitle: groupData.groupTitle,
+        profiles: tgProfiles,
+      })
+
+      // Run the standard profile filter pipeline
+      const filterResult = await runProfileFilter(leadId, 0, groupData.groupTitle, tgProfiles)
 
       const draftInput = {
         projectName: context?.projectName || lead?.project_name || leadId,
@@ -464,10 +493,25 @@ async function handleEnrichmentAction(
 
       const fullDraft = await generateFullDraft(leadId, draftInput)
       const hasTg = !!(context?.socialLinks?.telegram)
-      await sendDraftForApproval(leadId, draftInput.projectName, fullDraft.outreach, context?.socialLinks, hasTg)
-      await sendEnrichmentComplete(draftInput.projectName, draftInput.targetAudienceCount, filterResult.topTags || [])
 
-      return { ok: true, responseText: 'Audience analysis done! Draft ready for review.' }
+      // Include top high-value profile drafts in the approval message
+      const audienceSummary = highValue.slice(0, 3).map((p) =>
+        `• @${p.username || `user_${p.userId}`} (${p.role}, ${p.score}/100)`
+      ).join('\n')
+
+      await sendDraftForApproval(leadId, draftInput.projectName, fullDraft.outreach, context?.socialLinks, hasTg)
+
+      // Notify HITL of target audience found
+      const { sendTeamNotification } = await import('./telegram-client')
+      await sendTeamNotification(
+        `🎯 *Target Audience Found for ${draftInput.projectName}*` +
+        `\n\n*Group:* ${groupData.groupTitle} (${groupData.totalCount} members)` +
+        `\n*High-value targets:* ${highValue.length}` +
+        (audienceSummary ? `\n\n*Top targets:*\n${audienceSummary}` : '') +
+        `\n\nAdaptive outreach drafts generated per role. Review and approve above.`
+      )
+
+      return { ok: true, responseText: `Group scanned: ${highValue.length} high-value targets found. Draft ready for review.` }
     } catch (err: any) {
       console.error(`[Orchestrator] Enrichment group confirm failed:`, err.message)
       return { ok: false, responseText: `Error: ${err.message}` }
@@ -548,7 +592,7 @@ async function handleEnrichmentAction(
         painPoint: '',
         hook: '',
         verdict: 'LEAD',
-        targetAudienceTags: context.targetAudience?.map((p: any) => p.tags).flat() || [],
+        targetAudienceTags: context.targetAudience?.map((p: any) => p.signals).flat() || [],
         targetAudienceCount: context.targetAudience?.length || 0,
         tokenTicker: '',
         estimatedMcap: '',

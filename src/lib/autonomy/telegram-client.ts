@@ -66,6 +66,88 @@ export async function setWebhook(url: string): Promise<boolean> {
   }
 }
 
+// ─── TELEGRAM GROUP MEMBER FETCHING ─────────────────────────────────────────
+
+export interface TelegramMember {
+  userId: number
+  username: string | null
+  firstName: string
+  lastName?: string
+  isBot: boolean
+  isAdmin: boolean
+  isPremium?: boolean
+  bio?: string
+}
+
+async function telegramGet(endpoint: string, params?: Record<string, string>): Promise<any> {
+  if (!BOT_TOKEN) return { ok: false }
+  const url = new URL(`${API_BASE}/${endpoint}`)
+  if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
+  try {
+    const res = await fetch(url.toString())
+    return await res.json()
+  } catch {
+    return { ok: false }
+  }
+}
+
+/**
+ * Fetch group members after HITL confirms join.
+ * Uses getChatAdministrators for admin profiles and getChat for group info.
+ */
+export async function fetchGroupMembers(groupId: string): Promise<{
+  profiles: TelegramMember[]
+  groupTitle: string
+  groupDescription: string
+  totalCount: number
+}> {
+  const result = { profiles: [] as TelegramMember[], groupTitle: 'community', groupDescription: '', totalCount: 0 }
+
+  // Get chat info
+  const chat = await telegramGet('getChat', { chat_id: groupId })
+  if (chat.ok) {
+    result.groupTitle = chat.result?.title || groupId
+    result.groupDescription = chat.result?.description || ''
+  }
+
+  // Get admin list
+  const admins = await telegramGet('getChatAdministrators', { chat_id: groupId })
+  if (admins.ok && Array.isArray(admins.result)) {
+    for (const member of admins.result) {
+      const user = member.user
+      if (!user) continue
+      result.profiles.push({
+        userId: user.id,
+        username: user.username || null,
+        firstName: user.first_name || 'Unknown',
+        lastName: user.last_name,
+        isBot: user.is_bot || false,
+        isAdmin: true,
+        isPremium: user.is_premium || false,
+        bio: result.groupDescription || user.first_name,
+      })
+    }
+  }
+
+  // Try member count
+  const count = await telegramGet('getChatMemberCount', { chat_id: groupId })
+  if (count.ok) result.totalCount = count.result || 0
+
+  // If no admins fetched but we have group info, create a generic profile
+  if (result.profiles.length === 0 && result.groupTitle) {
+    result.profiles.push({
+      userId: 0,
+      username: groupId.replace(/[^a-zA-Z0-9_]/g, '_'),
+      firstName: result.groupTitle,
+      isBot: false,
+      isAdmin: false,
+      bio: result.groupDescription || `Member of ${result.groupTitle}`,
+    })
+  }
+
+  return result
+}
+
 // ─── ENRICHMENT WORKFLOW MESSAGES ──────────────────────────────────────────
 
 export interface InlineButton {

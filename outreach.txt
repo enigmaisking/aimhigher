@@ -1,0 +1,209 @@
+Outreach Audience Framework
+Your agents should target people most likely to:
+make decisions
+influence growth
+approve collaborations
+manage community operations
+respond quickly
+Do not target random members.
+
+
+Outreach Priority Order
+Tier 1 — Core Decision Makers
+Highest priority targets.
+Founders / Core Team
+Best overall targets.
+Common indicators:
+founder
+co-founder
+ceo
+core contributor
+builder
+team lead
+Signals:
+admin status
+project announcements
+speaks on behalf of project
+linked X account
+hosts spaces/interviews
+high reply visibility
+Best use case:
+strategic partnerships
+growth systems
+community expansion
+long-term collaboration
+
+
+Growth / Marketing Leads
+Usually easier to reach than founders and highly conversion-focused.
+Titles:
+head of growth
+marketing lead
+growth lead
+partnerships
+bizdev
+ecosystem lead
+community growth
+Best use case:
+campaigns
+engagement systems
+KOL outreach
+user acquisition
+community activation
+
+
+Community Managers / Lead Moderators
+Highest-response audience in Telegram-first workflows.
+Signals:
+daily activity
+moderates discussions
+answers members
+welcomes users
+coordinates announcements
+Titles:
+community manager
+moderator
+admin
+ambassador lead
+Best use case:
+community engagement
+group activity
+growth coordination
+warm introductions to founders
+
+
+Tier 2 — Secondary Targets
+Partnerships / Ecosystem Team
+Good for collaborations and exposure-related outreach.
+Titles:
+partnerships
+ecosystem
+business development
+collabs
+integration lead
+
+
+Influencer / KOL Managers
+Useful for projects already running influencer campaigns.
+Signals:
+interacts with creators
+coordinates promotions
+manages KOL campaigns
+active on X
+
+
+Tier 3 — Strategic Community Members
+Use when direct team access is difficult.
+Ideal traits:
+high engagement
+trusted by admins
+large X following
+frequent replies
+active voice in community
+Purpose:
+warm introductions
+relationship mapping
+internal referrals
+Exclude These Profiles
+Do not prioritize:
+inactive admins
+spam accounts
+support bots
+airdrop hunters
+silent members
+unverified accounts
+
+Profile Filter Logic
+Your profile-filter.ts should score users dynamically.
+Example structure:
+{
+  "username": "nova_growth",
+  "role": "growth_lead",
+  "priority": "high",
+  "score": 92,
+  "signals": [
+    "admin",
+    "high activity",
+    "linked X",
+    "team interactions",
+    "community authority"
+  ]
+}
+
+Scoring Model
+High Priority Signals
+admin badge
+founder keywords
+growth-related keywords
+linked socials
+high message frequency
+engagement from members
+visible authority
+
+
+Medium Priority Signals
+moderator role
+ecosystem role
+partnership-related activity
+active contributor
+
+
+Low Priority Signals
+low activity
+no socials
+minimal interaction
+generic usernames
+
+
+Telegram Workflow Logic
+Telegram should always be prioritized over X.
+Workflow:
+IF telegram exists:
+    join group
+    analyze members
+    identify team
+    rank targets
+    generate outreach drafts
+Priority order inside Telegram:
+1. Founder
+2. Growth lead
+3. Partnerships lead
+4. Community manager
+5. Moderator
+6. Connected community member
+Reason:
+community managers reply fastest
+founders make final decisions
+growth leads convert best
+
+
+X Fallback Workflow
+Use only when Telegram is unavailable.
+Workflow:
+IF telegram == null AND x != null:
+    analyze X account
+    identify founder/team
+    generate personalized outreach
+    notify HITL
+Priority targets:
+founders
+co-founders
+growth leads
+partnership managers
+Avoid generic support or announcement accounts.
+
+
+Adaptive Outreach Logic
+Your outreach agent should adapt messaging by role.
+Example:
+IF role == founder:
+    focus on scale and growth
+
+IF role == growth_lead:
+    focus on acquisition and engagement
+
+IF role == community_manager:
+    focus on activity and community health
+
+IF role == partnerships:
+    focus on collaboration opportunities

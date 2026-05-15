@@ -112,13 +112,12 @@ Positioning Hook:
 ${input.hook}
 
 Target: Founder/team of ${input.projectName} only.
+Target audience includes: ${targetInfo}.
 
 Generate a SHORT, compelling DM that:
 1. Opens with their specific pain point
 2. Connects it to AimHigher's performance-based, on-chain model
 3. Offers a quick chat to explore if it's a fit
-
-Target audience is the PROJECT TEAM (founders) — NOT KOLs or community members.
 `.trim()
 
   try {

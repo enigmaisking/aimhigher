@@ -1,9 +1,5 @@
 import { Lead } from './types'
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PROFILE TYPES
-// ─────────────────────────────────────────────────────────────────────────────
-
 export interface TelegramProfile {
   userId: number
   username: string | null
@@ -16,23 +12,39 @@ export interface TelegramProfile {
   groupId: number
   groupTitle: string
   photoUrl?: string
+  messageFrequency?: number
+  hasLinkedX?: boolean
+  isVerified?: boolean
 }
 
 export interface AnalyzedProfile extends TelegramProfile {
   score: number
-  tags: ProfileTag[]
+  priority: 'high' | 'medium' | 'low'
+  role: ProfileRole
+  signals: string[]
   outreachDraft?: string
   projectName?: string
 }
 
-export type ProfileTag =
+export type ProfileRole =
+  | 'founder'
+  | 'growth_lead'
+  | 'community_manager'
+  | 'partnerships'
+  | 'kol_manager'
+  | 'strategic_member'
+  | 'member'
+
+type ProfileTag =
   | 'FOUNDER'
   | 'ADMIN'
-  | 'KOL'
+  | 'GROWTH'
+  | 'MARKETING'
+  | 'COMMUNITY_MANAGER'
+  | 'PARTNERSHIPS'
+  | 'KOL_MANAGER'
+  | 'STRATEGIC'
   | 'INFLUENCER'
-  | 'ALPHA'
-  | 'VERIFIED_X'
-  | 'COMMUNITY_LEAD'
   | 'DEV'
 
 export interface ScanRequest {
@@ -50,60 +62,149 @@ export interface HITLAction {
   projectName: string
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SCORING MATRIX
-// ─────────────────────────────────────────────────────────────────────────────
-
-const SIGNAL_KEYWORDS: Record<ProfileTag, { weight: number; keywords: string[] }> = {
-  FOUNDER:       { weight: 50, keywords: ['our project', 'launching', 'mainnet', 'tokenomics', 'roadmap', 'founder', 'co-founder', 'built'] },
-  ADMIN:         { weight: 40, keywords: ['admin', 'moderator', 'management', 'team lead'] },
-  KOL:           { weight: 40, keywords: ['ama', 'collab', 'partnered', 'marketing', 'promotion', 'shill', 'kol'] },
-  INFLUENCER:    { weight: 35, keywords: ['influencer', 'content creator', 'youtube', 'tiktok', 'follower'] },
-  ALPHA:         { weight: 45, keywords: ['entry', 'target', '100x', 'moonshot', 'alpha', 'loading', 'call', 'signal'] },
-  VERIFIED_X:    { weight: 25, keywords: [] },
-  COMMUNITY_LEAD:{ weight: 30, keywords: ['community lead', 'community manager', 'ambassador', 'mod'] },
-  DEV:           { weight: 20, keywords: ['developer', 'engineer', 'solidity', 'smart contract', 'rust', 'audit'] },
-}
-
 export const SCORE_THRESHOLDS = {
-  HIGH_VALUE: 60,
-  MEDIUM_VALUE: 40,
+  HIGH_VALUE: 70,
+  MEDIUM_VALUE: 45,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PROFILE ANALYSIS
-// ─────────────────────────────────────────────────────────────────────────────
+const PRIORITY_ORDER: ProfileRole[] = [
+  'founder',
+  'growth_lead',
+  'partnerships',
+  'community_manager',
+  'kol_manager',
+  'strategic_member',
+  'member',
+]
+
+const EXCLUDE_KEYWORDS = [
+  'support bot', 'airdrop', 'claim', 'whitelist', 'spam',
+  'price bot', 'chart bot', 'moderator bot', 'announcement bot',
+  'inactive', 'unverified',
+]
+
+const SIGNAL_KEYWORDS: Record<string, { weight: number; keywords: string[]; signal: string }> = {
+  FOUNDER:          { weight: 60, keywords: ['founder', 'co-founder', 'ceo', 'core contributor', 'builder', 'team lead', 'building', 'created'], signal: 'founder keywords' },
+  GROWTH:           { weight: 55, keywords: ['head of growth', 'growth lead', 'growth', 'marketing lead', 'marketing', 'user acquisition', 'campaigns', 'community growth'], signal: 'growth-related keywords' },
+  COMMUNITY_MANAGER: { weight: 40, keywords: ['community manager', 'cm', 'moderator', 'ambassador lead', 'ambassador', 'mod', 'community lead', 'welcomes', 'coordinates'], signal: 'community management' },
+  PARTNERSHIPS:     { weight: 45, keywords: ['partnerships', 'ecosystem', 'business development', 'bizdev', 'collabs', 'integration', 'partnership'], signal: 'partnership-related activity' },
+  KOL_MANAGER:      { weight: 35, keywords: ['kol', 'influencer', 'creator', 'promotion', 'coordinator', 'collab manager'], signal: 'KOL campaign management' },
+  STRATEGIC:        { weight: 30, keywords: ['advisor', 'strategic', 'ecosystem lead', 'community development', 'growth advisor'], signal: 'strategic contributor' },
+  INFLUENCER:       { weight: 25, keywords: ['influencer', 'content creator', 'youtube', 'tiktok', 'follower'], signal: 'influencer' },
+  DEV:              { weight: 20, keywords: ['developer', 'engineer', 'solidity', 'smart contract', 'rust', 'audit', 'protocol'], signal: 'developer' },
+}
 
 export function analyzeProfile(profile: TelegramProfile): AnalyzedProfile {
   let score = 0
+  const signals: string[] = []
   const tags: ProfileTag[] = []
 
-  if (profile.isAdmin) {
+  const combinedText = `${profile.firstName} ${profile.lastName || ''} ${profile.bio}`.toLowerCase()
+  const username = (profile.username || '').toLowerCase()
+
+  if (EXCLUDE_KEYWORDS.some(k => combinedText.includes(k) || username.includes(k))) {
+    return {
+      ...profile,
+      score: 0,
+      priority: 'low',
+      role: 'member',
+      signals: ['excluded'],
+    }
+  }
+
+  const isAdmin = profile.isAdmin
+  const hasLinkedX = profile.hasLinkedX || /twitter\.com|x\.com/i.test(profile.bio)
+  const hasHighActivity = (profile.messageFrequency || 0) > 50
+  const hasMediumActivity = (profile.messageFrequency || 0) > 20
+  const isVerified = profile.isVerified || profile.isPremium || false
+
+  if (isAdmin) {
     score += 40
+    signals.push('admin badge')
     tags.push('ADMIN')
   }
 
-  const hasXLink = /twitter\.com|x\.com/i.test(profile.bio)
-  if (hasXLink) {
-    score += 25
-    tags.push('VERIFIED_X')
+  if (hasLinkedX) {
+    score += 20
+    signals.push('linked socials')
   }
 
-  const combinedText = `${profile.firstName} ${profile.lastName || ''} ${profile.bio}`.toLowerCase()
+  if (hasHighActivity) {
+    score += 20
+    signals.push('high message frequency')
+  } else if (hasMediumActivity) {
+    score += 10
+    signals.push('active contributor')
+  }
 
-  for (const [tag, data] of Object.entries(SIGNAL_KEYWORDS) as [ProfileTag, typeof SIGNAL_KEYWORDS[ProfileTag]][]) {
-    if (tag === 'VERIFIED_X') continue
-    if (data.keywords.some((k) => combinedText.includes(k))) {
+  if (isVerified) {
+    score += 10
+    signals.push('verified account')
+  }
+
+  for (const [tag, data] of Object.entries(SIGNAL_KEYWORDS)) {
+    if (data.keywords.some(k => combinedText.includes(k) || username.includes(k))) {
       score += data.weight
-      if (!tags.includes(tag)) tags.push(tag)
+      if (!signals.includes(data.signal)) signals.push(data.signal)
+      if (!tags.includes(tag as ProfileTag)) tags.push(tag as ProfileTag)
     }
+  }
+
+  const role = classifyProfileByTags(tags, isAdmin, hasLinkedX)
+  const priority = roleToPriority(role)
+
+  if (priority === 'low') {
+    score = Math.min(score, 30)
+    signals.push('minimal interaction')
+  }
+
+  if (!isAdmin && !hasLinkedX && !hasHighActivity && score < 20) {
+    signals.push('low activity')
+    signals.push('no socials')
   }
 
   return {
     ...profile,
     score: Math.min(score, 100),
-    tags,
+    priority,
+    role,
+    signals: [...new Set(signals)],
   }
+}
+
+function classifyProfileByTags(tags: ProfileTag[], isAdmin: boolean, hasLinkedX: boolean): ProfileRole {
+  if (tags.includes('FOUNDER')) return 'founder'
+  if (tags.includes('GROWTH')) return 'growth_lead'
+  if (tags.includes('PARTNERSHIPS')) return 'partnerships'
+  if (tags.includes('COMMUNITY_MANAGER')) return 'community_manager'
+  if (tags.includes('KOL_MANAGER')) return 'kol_manager'
+  if (tags.includes('STRATEGIC') || tags.includes('INFLUENCER')) return 'strategic_member'
+  if (isAdmin && hasLinkedX) return 'founder'
+  if (isAdmin) return 'community_manager'
+  if (tags.includes('DEV')) return 'strategic_member'
+  return 'member'
+}
+
+function roleToPriority(role: ProfileRole): 'high' | 'medium' | 'low' {
+  switch (role) {
+    case 'founder':
+    case 'growth_lead':
+    case 'community_manager':
+      return 'high'
+    case 'partnerships':
+    case 'kol_manager':
+      return 'medium'
+    case 'strategic_member':
+      return 'medium'
+    default:
+      return 'low'
+  }
+}
+
+export function getPriorityOrder(tier: 'high' | 'medium' | 'low'): ProfileRole[] {
+  if (tier === 'high') return ['founder', 'growth_lead', 'community_manager']
+  if (tier === 'medium') return ['partnerships', 'kol_manager', 'strategic_member']
+  return ['member']
 }
 
 export function filterHighValueProfiles(
@@ -111,55 +212,43 @@ export function filterHighValueProfiles(
   minScore: number = SCORE_THRESHOLDS.HIGH_VALUE
 ): AnalyzedProfile[] {
   return profiles
-    .filter((p) => p.score >= minScore && !p.isBot)
-    .sort((a, b) => b.score - a.score)
+    .filter(p => p.score >= minScore && !p.signals.includes('excluded') && p.role !== 'member')
+    .sort((a, b) => {
+      const aOrder = PRIORITY_ORDER.indexOf(a.role)
+      const bOrder = PRIORITY_ORDER.indexOf(b.role)
+      if (aOrder !== bOrder) return aOrder - bOrder
+      return b.score - a.score
+    })
 }
 
 export function classifyProfile(profile: AnalyzedProfile): string {
-  if (profile.tags.includes('FOUNDER')) return 'founder'
-  if (profile.tags.includes('KOL') || profile.tags.includes('INFLUENCER')) return 'kol'
-  if (profile.tags.includes('ADMIN')) return 'admin'
-  if (profile.tags.includes('COMMUNITY_LEAD')) return 'community_lead'
-  if (profile.tags.includes('DEV')) return 'dev'
-  if (profile.tags.includes('ALPHA')) return 'alpha'
-  return 'member'
+  return profile.role
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OUTREACH DRAFT GENERATION
-// ─────────────────────────────────────────────────────────────────────────────
 
 export function generateOutreachDraft(
   profile: AnalyzedProfile,
   projectName: string
 ): string {
   const handle = profile.username || `user ${profile.userId}`
-  const role = classifyProfile(profile)
 
   const templates: Record<string, string> = {
-    founder: `Hey @${handle}, saw you're building in the ${projectName} community. We help protocols reward contributors for driving real on-chain capital — not vanity metrics. Open to a quick chat?`,
-    kol: `Hey @${handle}, noticed your presence in ${projectName}. We're looking for KOLs who can drive real wallet activity, not just impressions. Want to hear more?`,
-    admin: `Hey @${handle}, you seem key to the ${projectName} community. AimHigher helps turn engaged members into capital-driving contributors. Worth a conversation?`,
-    community_lead: `Hey @${handle}, you clearly understand the ${projectName} community. We help projects reward real on-chain contributions. Would love your take.`,
-    dev: `Hey @${handle}, noticed you in the ${projectName} dev community. If you're working on growth experiments, AimHigher ties rewards to on-chain capital, not vanity. Thoughts?`,
-    alpha: `Hey @${handle}, saw your signals in ${projectName}. We help projects convert community energy into real TVL growth. Interested?`,
+    founder: `Hey @${handle}, saw you're leading ${projectName}. We help protocols scale growth by rewarding contributors for driving real on-chain capital — not vanity metrics. Open to a quick chat about growth systems?`,
+
+    growth_lead: `Hey @${handle}, noticed your role in ${projectName}. AimHigher helps growth teams turn community engagement into real user acquisition and on-chain capital. Worth exploring?`,
+
+    community_manager: `Hey @${handle}, you clearly drive the ${projectName} community. AimHigher helps reward active members for contributing real value. Would love your take on it.`,
+
+    partnerships: `Hey @${handle}, saw you're handling partnerships for ${projectName}. AimHigher creates collaboration opportunities through on-chain incentive pools that reward capital, not impressions. Worth a conversation?`,
+
+    kol_manager: `Hey @${handle}, noticed you manage KOL campaigns for ${projectName}. AimHigher complements influencer work by tying rewards to actual on-chain capital referred. Could be a powerful addition.`,
+
+    strategic_member: `Hey @${handle}, you're active in ${projectName} and clearly understand the space. We help projects convert community energy into real TVL growth. Interested to hear your thoughts.`,
   }
 
-  return templates[role] || templates.member
-}
+  const draft = templates[profile.role]
+  if (draft) return draft
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HITL DASHBOARD (Telegram Admin)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface DashboardCard {
-  text: string
-  buttons: InlineButton[][]
-}
-
-export interface InlineButton {
-  text: string
-  callbackData: string
+  return `Hey @${handle}, noticed you in the ${projectName} community. We help projects reward real on-chain contributions. Would love to connect.`
 }
 
 export function buildDashboardCard(
@@ -169,15 +258,19 @@ export function buildDashboardCard(
   queueTotal: number
 ): DashboardCard {
   const handle = profile.username ? `@${profile.username}` : `id:${profile.userId}`
-  const roleLabel = classifyProfile(profile).toUpperCase()
-  const tagLine = profile.tags.map((t) => `#${t}`).join(' ')
+  const roleLabel = profile.role.toUpperCase()
+  const priorityLabel = profile.priority.toUpperCase()
+  const signalLine = profile.signals.map(s => `• ${s}`).join('\n')
 
   const text = [
-    `🚀 *Profile Scan — ${projectName}*`,
+    `🎯 *Profile Scan — ${projectName}*`,
     `Queue: ${queuePosition}/${queueTotal}`,
     ``,
-    `*${handle}*  \`${roleLabel}\``,
-    `Score: ${profile.score}/100  |  ${tagLine}`,
+    `*${handle}*  \`${roleLabel}\`  [${priorityLabel}]`,
+    `Score: ${profile.score}/100`,
+    ``,
+    `*Signals:*`,
+    signalLine,
     ``,
     profile.bio ? `*Bio:* ${profile.bio.slice(0, 200)}` : '',
     ``,
@@ -228,7 +321,8 @@ export function buildApprovedConfirmationCard(
     `✅ *Approved — ${handle}*`,
     `Project: ${projectName}`,
     `Score: ${profile.score}/100`,
-    `Role: ${classifyProfile(profile).toUpperCase()}`,
+    `Role: ${profile.role.toUpperCase()}`,
+    `Priority: ${profile.priority.toUpperCase()}`,
     ``,
     `*Draft ready:*`,
     profile.outreachDraft || '',
@@ -243,10 +337,6 @@ export function buildApprovedConfirmationCard(
 
   return { text, buttons }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LEAD CONVERSION
-// ─────────────────────────────────────────────────────────────────────────────
 
 export function profileToLead(
   profile: AnalyzedProfile,
@@ -263,8 +353,8 @@ export function profileToLead(
     chain,
     contract_address: '',
     estimated_mcap: '',
-    why_good_fit: `Profile scan: ${profile.tags.join(', ')} in ${profile.groupTitle}`,
-    pain_point: profile.bio.slice(0, 300) || 'No bio available',
+    why_good_fit: `Role: ${profile.role}, Priority: ${profile.priority}, Signals: ${profile.signals.join(', ')}`,
+    pain_point: profile.bio.slice(0, 300) || `Potential ${profile.role} in ${projectName}`,
     estimated_treasury_size: '',
     contact_handle: handle,
     source_signal: `telegram_scan:${profile.groupTitle}`,
@@ -280,7 +370,9 @@ export function profileToLead(
     hook: profile.outreachDraft || '',
     status: 'new',
     notes: JSON.stringify({
-      tags: profile.tags,
+      role: profile.role,
+      priority: profile.priority,
+      signals: profile.signals,
       rawScore: profile.score,
       groupId: profile.groupId,
       userId: profile.userId,
@@ -288,10 +380,6 @@ export function profileToLead(
     created_by: 'profile-filter',
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SCAN ORCHESTRATION
-// ─────────────────────────────────────────────────────────────────────────────
 
 export function processScanResults(scan: ScanRequest): {
   analyzed: AnalyzedProfile[]
@@ -308,10 +396,6 @@ export function processScanResults(scan: ScanRequest): {
   return { analyzed, highValue }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// QUEUE MANAGEMENT
-// ─────────────────────────────────────────────────────────────────────────────
-
 export interface ProfileQueue {
   projectName: string
   profiles: AnalyzedProfile[]
@@ -320,10 +404,25 @@ export interface ProfileQueue {
   skipped: number[]
 }
 
+export interface DashboardCard {
+  text: string
+  buttons: InlineButton[][]
+}
+
+export interface InlineButton {
+  text: string
+  callbackData: string
+}
+
 export function createQueue(projectName: string, profiles: AnalyzedProfile[]): ProfileQueue {
   return {
     projectName,
-    profiles,
+    profiles: profiles.sort((a, b) => {
+      const aOrder = PRIORITY_ORDER.indexOf(a.role)
+      const bOrder = PRIORITY_ORDER.indexOf(b.role)
+      if (aOrder !== bOrder) return aOrder - bOrder
+      return b.score - a.score
+    }),
     currentIndex: 0,
     approved: [],
     skipped: [],
@@ -357,10 +456,6 @@ export function skipCurrent(queue: ProfileQueue): ProfileQueue {
 export function isScanComplete(queue: ProfileQueue): boolean {
   return queue.currentIndex >= queue.profiles.length
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TELEGRAM CALLBACK PARSER (for webhook handler)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export function parseCallbackData(raw: string): HITLAction | null {
   const parts = raw.split('_')

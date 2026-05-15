@@ -41,15 +41,15 @@ export async function runProfileFilter(
       (p) => p.score >= SCORE_THRESHOLDS.MEDIUM_VALUE && p.score < SCORE_THRESHOLDS.HIGH_VALUE
     )
 
-    // Aggregate tags from high-value profiles
+    // Aggregate roles/signals from high-value profiles
     const tagCounts: Record<string, number> = {}
     for (const profile of highValue) {
-      for (const tag of profile.tags) {
-        tagCounts[tag] = (tagCounts[tag] || 0) + 1
+      for (const signal of profile.signals) {
+        tagCounts[signal] = (tagCounts[signal] || 0) + 1
       }
     }
 
-    // Sort tags by frequency
+    // Sort signals by frequency
     const topTags = Object.entries(tagCounts)
       .sort(([, a], [, b]) => b - a)
       .slice(0, 5)
@@ -70,7 +70,8 @@ export async function runProfileFilter(
           userId: p.userId,
           username: p.username,
           score: p.score,
-          tags: p.tags,
+          role: p.role,
+          signals: p.signals,
         })),
       })
     } catch (err) {
@@ -118,9 +119,9 @@ export function formatFilterResults(result: FilterRunResult, groupTitle: string)
   if (result.highValueProfiles.length > 0) {
     lines.push(`*Top 5 High-Value Members:*`)
     for (const profile of result.highValueProfiles.slice(0, 5)) {
-      const tagStr = profile.tags.slice(0, 2).join(', ')
+      const roleStr = profile.role
       lines.push(
-        `  • @${profile.username || `user_${profile.userId}`} (${profile.score}pts) - ${tagStr}`
+        `  • @${profile.username || `user_${profile.userId}`} (${profile.score}pts) - ${roleStr} [${profile.priority}]`
       )
     }
   }

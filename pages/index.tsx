@@ -44,6 +44,8 @@ type Lead = {
   twitterHandle?: string | null
   telegramHandle?: string | null
   websiteUrl?: string | null
+  discordUrl?: string | null
+  email?: string | null
   sources: LeadSource[]
   scoreBreakdown: ScoreBreakdown
   confidence: number
@@ -358,15 +360,49 @@ export default function HomePage() {
     addAgentMessage('outreach', text)
   }
 
-  const sendMessage = (preset?: string) => {
+  const AIMHIGHER_KEYWORDS = ['aimhigher', 'pool', 'score', 'scoring', 'eligible', 'eligibility', 'minimum', 'reward', 'campaign', 'contributor', 'kol', 'payout', 'deploy', 'contract', 'wallet', 'chain', 'treasury', 'market cap', 'mcap', 'tvl', 'gas', 'referral', 'duration', 'incentive', 'traffic', 'capital', 'snapshot', 'governance', 'token', 'ticker', 'founder', 'community', 'launch', 'setup', 'onboard', 'pricing', 'fee', 'fees', 'cost', 'how it works', 'difference', 'versus', 'vs', 'compare', 'compatible', 'supported', 'create pool', 'fund pool', 'payouts', 'withdraw', 'link']
+
+  const isAimhigherQuestion = (text: string): boolean => {
+    const lower = text.toLowerCase().trim()
+    const isQuestion = lower.includes('?') || /^(what|how|why|can|does|is|are|do|will|should|could|would|tell me|explain)/.test(lower)
+    const mentionsAimhigher = AIMHIGHER_KEYWORDS.some(topic => lower.includes(topic))
+    return isQuestion && mentionsAimhigher
+  }
+
+  const sendMessage = async (preset?: string) => {
     if (!selectedLead) return
     const text = (preset || input).trim()
     if (!text) return
     addAgentMessage(activeAgent, text, 'user')
-    if (activeAgent === 'outreach') addAgentMessage('outreach', composeOutreachMessage(selectedLead, recipient, platform, tone, messageType))
-    if (activeAgent === 'scout') addAgentMessage('scout', `${selectedLead.name} remains ${selectedLead.verdict} at ${selectedLead.score}/10. Top source: ${selectedLead.sources[0]?.signalText || selectedLead.painPoint}`)
-    if (activeAgent === 'onboard') addAgentMessage('onboard', `Next for ${selectedLead.name}: ${onboardingSteps[onboardingStep - 1]}. Keep the founder on this step before moving ahead.`)
-    if (activeAgent === 'qa') addAgentMessage('qa', answerQuestion(selectedLead, text))
+    if (activeAgent === 'outreach' || activeAgent === 'onboard') {
+      if (isAimhigherQuestion(text)) {
+        try {
+          const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agent: 'qa',
+              messages: [{ role: 'user', content: text }],
+            }),
+          })
+          const json = await res.json()
+          if (json.ok && json.text) {
+            addAgentMessage(activeAgent, json.text)
+          } else {
+            addAgentMessage(activeAgent, activeAgent === 'outreach' ? composeOutreachMessage(selectedLead, recipient, platform, tone, messageType) : `Next for ${selectedLead.name}: ${onboardingSteps[onboardingStep - 1]}. Keep the founder on this step before moving ahead.`)
+          }
+        } catch {
+          addAgentMessage(activeAgent, activeAgent === 'outreach' ? composeOutreachMessage(selectedLead, recipient, platform, tone, messageType) : `Next for ${selectedLead.name}: ${onboardingSteps[onboardingStep - 1]}. Keep the founder on this step before moving ahead.`)
+        }
+      } else {
+        if (activeAgent === 'outreach') addAgentMessage('outreach', composeOutreachMessage(selectedLead, recipient, platform, tone, messageType))
+        if (activeAgent === 'onboard') addAgentMessage('onboard', `Next for ${selectedLead.name}: ${onboardingSteps[onboardingStep - 1]}. Keep the founder on this step before moving ahead.`)
+      }
+    } else if (activeAgent === 'scout') {
+      addAgentMessage('scout', `${selectedLead.name} remains ${selectedLead.verdict} at ${selectedLead.score}/10. Top source: ${selectedLead.sources[0]?.signalText || selectedLead.painPoint}`)
+    } else if (activeAgent === 'qa') {
+      addAgentMessage('qa', answerQuestion(selectedLead, text))
+    }
     setInput('')
   }
 

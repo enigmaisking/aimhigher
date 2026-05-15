@@ -12,6 +12,91 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next'
 
+const SCAN_CHAINS: Record<string, string[]> = {
+  all: ['eth', 'solana', 'bsc', 'base', 'avax', 'arbitrum', 'optimism', 'polygon-pos', 'fantom'],
+  evm: ['eth', 'bsc', 'base', 'avax', 'arbitrum', 'optimism', 'polygon-pos', 'fantom'],
+  solana: ['solana'],
+}
+
+async function runScan(chatId: number | string, preset: string, botToken: string) {
+  const chains = SCAN_CHAINS[preset] || SCAN_CHAINS.all
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://aimhigher-one.vercel.app'
+
+  // Notify user scan started
+  await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: `🔍 Scanning ${chains.length} chains (${preset})...`,
+      parse_mode: 'Markdown',
+    }),
+  })
+
+  try {
+    const scoutRes = await fetch(`${appUrl}/api/scout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chains,
+        sourceTypes: ['onchain'],
+        minimumScore: 7,
+        pageSize: 10,
+        manualSignals: [],
+      }),
+    })
+
+    if (!scoutRes.ok) {
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: `❌ Scout API returned ${scoutRes.status}`, parse_mode: 'Markdown' }),
+      })
+      return
+    }
+
+    const { data } = await scoutRes.json()
+    const leads = data?.leads || []
+
+    if (leads.length === 0) {
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: 'No qualifying leads found with current criteria.', parse_mode: 'Markdown' }),
+      })
+      return
+    }
+
+    // Send top leads as formatted messages
+    const topLeads = leads.slice(0, 5)
+    for (const lead of topLeads) {
+      const msg = [
+        `*${lead.name}* (${lead.ticker})`,
+        `Chain: ${lead.chain} · Score: ${lead.score}/10`,
+        `Mcap: ${lead.mcap} · Pain: ${lead.painPoint}`,
+        `Contract: \`${lead.tokenAddress || 'N/A'}\``,
+      ].join('\n')
+
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: 'Markdown' }),
+      })
+    }
+
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: `✅ Found ${leads.length} leads. ${leads.length > 5 ? `Showing top 5. Visit the dashboard for all ${leads.length}.` : ''}`,
+        parse_mode: 'Markdown',
+      }),
+    })
+  } catch (err: any) {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: `❌ Scan error: ${err.message}`, parse_mode: 'Markdown' }),
+    })
+  }
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -24,8 +109,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (body.callback_query) {
       const cb = body.callback_query
       const data = cb.data || ''
+      const botToken = process.env.TELEGRAM_BOT_TOKEN
 
       console.log(`[Telegram Webhook] Callback: ${data} from user ${cb.from?.id}`)
+
+      // Handle scan presets
+      if (data.startsWith('scan_') && botToken) {
+        const preset = data.replace('scan_', '')
+        await runScan(cb.message?.chat?.id || cb.from?.id, preset, botToken)
+        if (botToken) {
+          await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ callback_query_id: cb.id, text: 'Scan started!', show_alert: false }),
+          })
+        }
+        return res.status(200).json({ ok: true })
+      }
 
       // Import orchestrator dynamically to avoid circular deps
       const { handleHITLCallback } = await import('../../../src/lib/autonomy/orchestrator')
@@ -33,7 +132,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const result = await handleHITLCallback(data)
 
       // Answer callback (removes loading spinner on button)
-      const botToken = process.env.TELEGRAM_BOT_TOKEN
       if (botToken) {
         await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
           method: 'POST',
@@ -75,8 +173,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               '👋 *AimHigher Autonomy Bot* active.\n\n'
               + 'New leads from Scout scans will appear here for review.\n'
               + 'Use the inline buttons to approve, skip, or discard each lead.\n\n'
-              + 'Alerts: premium leads, DM failures, manual intervention requests.',
+              + 'Commands:\n'
+              + '/scan — Run a scout scan from here\n'
+              + '/start — Show this message',
             parse_mode: 'Markdown',
+          }),
+        })
+      }
+      return res.status(200).json({ ok: true })
+    }
+
+    // Handle /scan command
+    if (text.startsWith('/scan')) {
+      const botToken = process.env.TELEGRAM_BOT_TOKEN
+      if (botToken) {
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: '🔍 *Select scan preset:*',
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: '🚀 All Chains', callback_data: 'scan_all' },
+                  { text: '⛓️ EVM', callback_data: 'scan_evm' },
+                ],
+                [
+                  { text: '🌐 Solana', callback_data: 'scan_solana' },
+                ],
+              ],
+            },
           }),
         })
       }

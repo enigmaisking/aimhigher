@@ -152,34 +152,28 @@ export async function sendDraftForApproval(
   leadId: string,
   projectName: string,
   outreachDraft: string,
-  onboardingDraft?: string
+  socialLinks?: { twitter?: string | null; telegram?: string | null; discord?: string | null; website?: string | null }
 ): Promise<{ ok: boolean; messageId?: number; error?: string }> {
-  const draftSection = onboardingDraft
-    ? `
-*📝 Outreach Message:*
-\`\`\`
-${outreachDraft}
-\`\`\`
+  const links = socialLinks || {}
+  const linkLines: string[] = []
+  if (links.twitter) linkLines.push(`🐦 [X/Twitter](${links.twitter})`)
+  if (links.discord) linkLines.push(`💬 [Discord](${links.discord})`)
+  if (links.website) linkLines.push(`🌐 [Website](${links.website})`)
+  if (links.telegram) linkLines.push(`✈️ [Telegram](${links.telegram})`)
 
-*🎓 Onboarding Message:*
-\`\`\`
-${onboardingDraft}
-\`\`\`
-`
-    : `
-*📝 Outreach Message:*
-\`\`\`
-${outreachDraft}
-\`\`\`
-`
+  const linksSection = linkLines.length > 0
+    ? `\n*🔗 Project Links:*\n${linkLines.join('\n')}\n`
+    : ''
 
   const message = [
-    `*✏️ Review Draft for ${projectName}*`,
+    `*✏️ Outreach Draft for ${projectName}*`,
+    linksSection,
+    `*📝 Message:*`,
+    `\`\`\``,
+    outreachDraft,
+    `\`\`\``,
     ``,
-    `The LLM has generated a personalized outreach message based on the target audience profile.`,
-    draftSection,
-    ``,
-    `Please review and approve to send, or skip this lead.`,
+    `Review and approve to send, or click Edit to regenerate.`,
   ].join('\n')
 
   const buttons: InlineButton[][] = [

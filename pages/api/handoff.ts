@@ -55,7 +55,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       const fullDraft = await generateFullDraft(leadId, draftInput)
-      await sendDraftForApproval(leadId, context.projectName, fullDraft.outreach, fullDraft.onboarding)
+      await sendDraftForApproval(leadId, context.projectName, fullDraft.outreach, context.socialLinks)
 
       console.log(`[Handoff] Draft sent for approval: ${context.projectName}`)
     }

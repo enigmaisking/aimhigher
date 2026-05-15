@@ -455,7 +455,7 @@ async function handleEnrichmentAction(
       }
 
       const fullDraft = await generateFullDraft(leadId, draftInput)
-      await sendDraftForApproval(leadId, draftInput.projectName, fullDraft.outreach, fullDraft.onboarding)
+      await sendDraftForApproval(leadId, draftInput.projectName, fullDraft.outreach)
       await sendEnrichmentComplete(draftInput.projectName, draftInput.targetAudienceCount, filterResult.topTags || [])
 
       return { ok: true, responseText: 'Audience analysis done! Draft ready for review.' }
@@ -529,7 +529,7 @@ async function handleEnrichmentAction(
         outreachDraft: newDraft.outreach,
         onboardingDraft: newDraft.onboarding,
       })
-      await sendDraftForApproval(leadId, context.projectName, newDraft.outreach, newDraft.onboarding)
+      await sendDraftForApproval(leadId, context.projectName, newDraft.outreach)
 
       return { ok: true, responseText: 'Draft regenerated! Review the new version.' }
     } catch (err: any) {

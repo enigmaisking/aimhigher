@@ -213,37 +213,24 @@ export async function dispatchDM(
   message: string,
   preferredPlatform: 'x' | 'telegram'
 ): Promise<{ ok: boolean; platform?: string; error?: string }> {
-  // Try preferred platform first, fallback to the other
-  if (preferredPlatform === 'x' && lead.twitterHandle) {
+  // Telegram is always priority when available
+  if (lead.telegramHandle) {
+    const tg = await sendTelegram(lead.telegramHandle, message)
+    if (tg.ok) return { ok: true, platform: 'telegram' }
+  }
+
+  // Fallback to X/Twitter
+  if (lead.twitterHandle) {
     const user = await lookupUserByHandle(lead.twitterHandle)
     if (user.ok && user.userId) {
       const dm = await sendDirectMessage(user.userId, message)
       if (dm.ok) return { ok: true, platform: 'x' }
     }
-    // If X fails and we have Telegram, try that
-    if (lead.telegramHandle) {
-      const tg = await sendTelegram(lead.telegramHandle, message)
-      if (tg.ok) return { ok: true, platform: 'telegram' }
-    }
     return { ok: false, error: `Failed to DM @${lead.twitterHandle} on X` }
   }
 
-  if (preferredPlatform === 'telegram' && lead.telegramHandle) {
-    const tg = await sendTelegram(lead.telegramHandle, message)
-    if (tg.ok) return { ok: true, platform: 'telegram' }
-    // If Telegram fails and we have X, try that
-    if (lead.twitterHandle) {
-      const user = await lookupUserByHandle(lead.twitterHandle)
-      if (user.ok && user.userId) {
-        const dm = await sendDirectMessage(user.userId, message)
-        if (dm.ok) return { ok: true, platform: 'x' }
-      }
-    }
-    return { ok: false, error: `Failed to DM @${lead.telegramHandle} on Telegram` }
-  }
-
-  // No direct handle available
-  return { ok: false, error: `No ${preferredPlatform} handle for ${lead.name}` }
+  // No handle available on preferred platform
+  return { ok: false, error: `No reachable handle for ${lead.name}` }
 }
 
 // ─── MANUAL INTERVENTION REQUEST ─────────────────────────────────────────────

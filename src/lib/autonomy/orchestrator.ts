@@ -408,7 +408,7 @@ async function onCampaignLive(event: AutonomyEvent): Promise<void> {
 
 function decodeEnrichmentCallback(raw: string): { action: string; leadId: string } | null {
   const prefixes = [
-    'enrich_group_confirmed_', 'enrich_draft_approve_', 'enrich_draft_edit_',
+    'enrich_group_confirmed_', 'enrich_draft_approve_manual_', 'enrich_draft_approve_', 'enrich_draft_edit_',
     'enrich_review_', 'enrich_skip_',
   ]
   for (const prefix of prefixes) {
@@ -463,7 +463,8 @@ async function handleEnrichmentAction(
       }
 
       const fullDraft = await generateFullDraft(leadId, draftInput)
-      await sendDraftForApproval(leadId, draftInput.projectName, fullDraft.outreach)
+      const hasTg = !!(context?.socialLinks?.telegram)
+      await sendDraftForApproval(leadId, draftInput.projectName, fullDraft.outreach, context?.socialLinks, hasTg)
       await sendEnrichmentComplete(draftInput.projectName, draftInput.targetAudienceCount, filterResult.topTags || [])
 
       return { ok: true, responseText: 'Audience analysis done! Draft ready for review.' }
@@ -473,7 +474,7 @@ async function handleEnrichmentAction(
     }
   }
 
-  // Draft approval → send DM with approved outreach
+  // Draft approval → send DM via Telegram (priority) or X
   if (action === 'enrich_draft_approve') {
     console.log(`[Orchestrator] Enrichment: draft approved for ${leadId}`)
     try {
@@ -483,12 +484,15 @@ async function handleEnrichmentAction(
       const context = getCachedContext(leadId)
       const outreachDraft = context?.outreachDraft
       const projectName = context?.projectName || lead?.project_name || leadId
+      const hasTelegram = !!(context?.socialLinks?.telegram || lead?.telegramHandle)
 
       if (outreachDraft && lead) {
+        // Telegram first (priority), fallback to X
+        const preferredPlatform = hasTelegram ? 'telegram' : 'x'
         const dmResult = await dispatchDM(
           { name: projectName, twitterHandle: lead.twitterHandle, telegramHandle: lead.telegramHandle },
           outreachDraft,
-          'x',
+          preferredPlatform,
         )
         if (dmResult.ok) {
           try {
@@ -505,6 +509,24 @@ async function handleEnrichmentAction(
       return { ok: true, responseText: 'Draft approved! (No outreach draft stored — send manually.)' }
     } catch (err: any) {
       console.error(`[Orchestrator] Enrichment draft approval failed:`, err.message)
+      return { ok: false, responseText: `Error: ${err.message}` }
+    }
+  }
+
+  // Manual draft approval (X-only projects) — no auto-send, just mark approved
+  if (action === 'enrich_draft_approve_manual') {
+    console.log(`[Orchestrator] Enrichment: draft approved (manual) for ${leadId}`)
+    try {
+      const { handleHITLDraftApproval } = await import('./lead-enrichment-handler')
+      await handleHITLDraftApproval(leadId, true)
+
+      try {
+        await airtableClient.updateLead(leadId, { status: 'contacted', notes: 'Draft approved for manual outreach (X-only project).' })
+      } catch {}
+
+      return { ok: true, responseText: 'Draft approved! Send it manually on X.' }
+    } catch (err: any) {
+      console.error(`[Orchestrator] Enrichment manual approval failed:`, err.message)
       return { ok: false, responseText: `Error: ${err.message}` }
     }
   }
@@ -537,7 +559,8 @@ async function handleEnrichmentAction(
         outreachDraft: newDraft.outreach,
         onboardingDraft: newDraft.onboarding,
       })
-      await sendDraftForApproval(leadId, context.projectName, newDraft.outreach)
+      const hasTg = !!(context?.socialLinks?.telegram)
+      await sendDraftForApproval(leadId, context.projectName, newDraft.outreach, context?.socialLinks, hasTg)
 
       return { ok: true, responseText: 'Draft regenerated! Review the new version.' }
     } catch (err: any) {

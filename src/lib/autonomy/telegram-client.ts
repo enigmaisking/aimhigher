@@ -152,9 +152,11 @@ export async function sendDraftForApproval(
   leadId: string,
   projectName: string,
   outreachDraft: string,
-  socialLinks?: { twitter?: string | null; telegram?: string | null; discord?: string | null; website?: string | null }
+  socialLinks?: { twitter?: string | null; telegram?: string | null; discord?: string | null; website?: string | null },
+  hasTelegram?: boolean,
 ): Promise<{ ok: boolean; messageId?: number; error?: string }> {
   const links = socialLinks || {}
+  const hasTg = hasTelegram || !!(links.telegram)
   const linkLines: string[] = []
   if (links.twitter) linkLines.push(`🐦 [X/Twitter](${links.twitter})`)
   if (links.discord) linkLines.push(`💬 [Discord](${links.discord})`)
@@ -165,22 +167,30 @@ export async function sendDraftForApproval(
     ? `\n*🔗 Project Links:*\n${linkLines.join('\n')}\n`
     : ''
 
+  const approveText = hasTg ? '✅ Approve & Send via Telegram' : '✅ Approve (manual send)'
+  const approveAction = hasTg ? 'enrich_draft_approve' : 'enrich_draft_approve_manual'
+
   const message = [
     `*✏️ Outreach Draft for ${projectName}*`,
     linksSection,
+    hasTg
+      ? `_Telegram available — will send auto-DM on approval._`
+      : `_X only — draft prepared for manual outreach._`,
     `*📝 Message:*`,
     `\`\`\``,
     outreachDraft,
     `\`\`\``,
     ``,
-    `Review and approve to send, or click Edit to regenerate.`,
+    hasTg
+      ? `Review and approve to auto-send via Telegram.`
+      : `Review the draft, then continue outreach manually on X.`,
   ].join('\n')
 
   const buttons: InlineButton[][] = [
     [
       {
-        text: '✅ Approve & Send',
-        callback_data: `enrich_draft_approve_${leadId}`,
+        text: approveText,
+        callback_data: `${approveAction}_${leadId}`,
       },
       {
         text: '✏️ Edit Draft',

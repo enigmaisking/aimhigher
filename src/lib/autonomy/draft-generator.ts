@@ -31,17 +31,32 @@ export interface GeneratedDraft {
 /**
  * System prompt for outreach draft generation
  */
-const OUTREACH_SYSTEM_PROMPT = `You are an expert Web3 community manager and growth strategist.
-Your task is to generate personalized outreach messages for DeFi/blockchain projects.
+const OUTREACH_SYSTEM_PROMPT = `You are an expert Web3 growth strategist crafting outreach to project founders.
+Your task: generate a short DM from AimHigher (aimhigher.gg) to a project founder.
+
+ABOUT AIMHIGHER:
+AimHigher is a performance-based marketing platform for Web3 projects.
+Projects launch on-chain incentive pools that reward contributors for driving
+REAL invested capital — not vanity metrics like likes, impressions, or follows.
+Setup takes under 10 minutes. Minimum pool: $2,500 equivalent in any token.
+Scoring favors referred capital (2x) and invested capital (1x) — bots and
+fake traffic score zero. Supported chains: ETH, SOL, BNB, Base, ARB, OP,
+Polygon, AVAX, FTM.
 
 Guidelines:
-1. Keep outreach SHORT and punchy (2-3 sentences max)
-2. Lead with VALUE to the target audience
-3. Address their specific role/tag (e.g., if KOL: mention influence, if Dev: mention technical integration)
-4. Include a clear call-to-action
-5. Be genuine - no spam or BS
-6. Reference the project's pain point to show understanding
-7. End with a link or contact method
+1. Keep it SHORT (2-3 sentences max)
+2. Lead with their SPECIFIC pain point — show you understand their growth struggle
+3. Then connect it to what AimHigher offers (performance-based, on-chain, real capital)
+4. Address founders/team only — not KOLs or community members
+5. Include a clear call-to-action (quick chat, see a demo)
+6. Be genuine and peer-to-peer — no spam, no hype
+7. End with: "Would you be open to a quick chat?" or similar CTA
+8. NEVER mention KOLs, influencers, or community members as targets
+
+Example structure:
+"Hey, saw [project] has [specific pain point]. AimHigher helps projects turn
+marketing spend into real on-chain TVL — not just impressions. Worth a
+10-min chat to see if it's a fit?"
 
 Output ONLY the message text, no explanations.`
 
@@ -84,23 +99,26 @@ export async function generateOutreachDraft(input: DraftGeneratorInput): Promise
     .join(', ')
 
   const prompt = `
-Generate a personalized outreach message for:
+Generate a personalized outreach message from AimHigher to a project founder:
 
 Project: ${input.projectName} (${input.tokenTicker || 'N/A'})
 Chain: ${input.chain}
 Mcap: ${input.estimatedMcap || 'N/A'}
 
-Value Proposition:
+Their Pain Point (lead with this):
 ${input.painPoint}
 
 Positioning Hook:
 ${input.hook}
 
-Target Audience: ${input.targetAudienceCount} high-value members
-Roles: ${targetInfo}
+Target: Founder/team of ${input.projectName} only.
 
-Generate a SHORT, compelling DM that would resonate with this audience.
-Make them want to learn more or take action immediately.
+Generate a SHORT, compelling DM that:
+1. Opens with their specific pain point
+2. Connects it to AimHigher's performance-based, on-chain model
+3. Offers a quick chat to explore if it's a fit
+
+Target audience is the PROJECT TEAM (founders) — NOT KOLs or community members.
 `.trim()
 
   try {

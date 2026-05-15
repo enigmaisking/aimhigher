@@ -180,42 +180,54 @@ export default function ScoutPage() {
                   ⚡ {lead.pain_point}
                 </p>
 
-                {/* Social Links */}
-                <div className="flex gap-2 flex-wrap mb-3">
-                  {lead.twitterHandle && (
-                    <a href={lead.twitterHandle.startsWith('http') ? lead.twitterHandle : `https://twitter.com/${lead.twitterHandle}`}
-                       target="_blank" rel="noopener noreferrer"
-                       className="text-xs text-[#1DA1F2] hover:underline">
-                      𝕏 / Twitter
-                    </a>
-                  )}
-                  {lead.telegramHandle && (
-                    <a href={lead.telegramHandle.startsWith('http') ? lead.telegramHandle : `https://t.me/${lead.telegramHandle}`}
-                       target="_blank" rel="noopener noreferrer"
-                       className="text-xs text-[#0088CC] hover:underline">
-                      ✈️ Telegram
-                    </a>
-                  )}
-                  {lead.websiteUrl && (
-                    <a href={lead.websiteUrl.startsWith('http') ? lead.websiteUrl : `https://${lead.websiteUrl}`}
-                       target="_blank" rel="noopener noreferrer"
-                       className="text-xs text-[#A0A0B0] hover:underline">
-                      🌐 Website
-                    </a>
-                  )}
-                  {lead.discordUrl && (
-                    <a href={lead.discordUrl.startsWith('http') ? lead.discordUrl : `https://discord.gg/${lead.discordUrl}`}
-                       target="_blank" rel="noopener noreferrer"
-                       className="text-xs text-[#5865F2] hover:underline">
-                      💬 Discord
-                    </a>
-                  )}
-                </div>
-
                 {/* Hook */}
                 <p className="text-sm text-[#A0A0B0] mb-4 leading-relaxed flex-1">
                   {lead.hook}
                 </p>
+
+                {/* Social Links */}
+                <div className="flex gap-2 flex-wrap mb-4">
+                  {lead.twitterHandle && (
+                    <a
+                      href={lead.twitterHandle.startsWith('http') ? lead.twitterHandle : `https://x.com/${lead.twitterHandle}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-[#1DA1F2] hover:underline"
+                    >
+                      𝕏 {lead.twitterHandle.replace(/^https?:\/\/(x|twitter)\.com\//, '')}
+                    </a>
+                  )}
+                  {lead.telegramHandle && (
+                    <a
+                      href={lead.telegramHandle.startsWith('http') ? lead.telegramHandle : `https://t.me/${lead.telegramHandle}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-[#0088CC] hover:underline"
+                    >
+                      Telegram {lead.telegramHandle.replace(/^https?:\/\/t\.me\//, '')}
+                    </a>
+                  )}
+                  {lead.websiteUrl && (
+                    <a
+                      href={lead.websiteUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-[#A0A0B0] hover:underline"
+                    >
+                      🌐 website
+                    </a>
+                  )}
+                  {lead.discordUrl && (
+                    <a
+                      href={lead.discordUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-[#5865F2] hover:underline"
+                    >
+                      Discord
+                    </a>
+                  )}
+                </div>
 
                 {/* Action Buttons */}
                 <div className="flex gap-3">

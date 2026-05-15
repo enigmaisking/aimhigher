@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 
-const GECKO_BASE = 'https://api.geckoterminal.com/api/v2'
+const GECKO_BASE = 'https://api.geckoterminal.com/api/v3'
 
 type SourceType = 'onchain' | 'x' | 'telegram' | 'reddit' | 'governance' | 'manual'
 type RecipientType = 'founder' | 'dev' | 'agent' | 'kol' | 'influencer' | 'community'
@@ -9,17 +9,16 @@ type HandoffAgent = 'scout' | 'outreach' | 'onboard' | 'qa'
 
 interface GeckoPool {
   id: string
+  type: string
   attributes: {
     name: string
-    symbol?: string
     address: string
-    market_cap_usd?: string
     reserve_in_usd?: string
     volume_usd?: { h24?: string }
-    price_percent_change?: { h24?: string }
+    price_percent_change_usd?: { h24?: string }
   }
   relationships?: {
-    base_token?: { data?: { id: string } }
+    base_token?: { data?: { id: string; type: string } }
   }
 }
 
@@ -224,43 +223,51 @@ function scoreProject(project: Project, sources: LeadSource[]): ScoreBreakdown {
 async function fetchGeckoPools(chain: string, endpoint: string): Promise<Project[]> {
   const projects: Project[] = []
   const geckoChain = normalizeChain(chain)
-  const response = await fetch(`${GECKO_BASE}/networks/${geckoChain}/${endpoint}?limit=50&include=base_token`, {
+
+  // v3 pool endpoints: pools/trending, pools/new
+  const v3Endpoint = endpoint === 'trending_pools' ? 'pools/trending' : 'pools/new'
+  const url = `${GECKO_BASE}/networks/${geckoChain}/${v3Endpoint}?limit=50&include=base_token`
+
+  const response = await fetch(url, {
     headers: { 'User-Agent': 'AimHigherScout/1.0' },
   })
-  if (!response.ok) return projects
+  if (!response.ok) {
+    console.warn(`[Scout] v3 ${geckoChain}/${v3Endpoint}: ${response.status}`)
+    return projects
+  }
 
   const data = await response.json()
-  const pools = (data.data || []) as GeckoPool[]
-  const included = (data.included || []) as GeckoToken[]
 
-  // Build a map of token id → attributes for quick lookup
+  // v3 response: { data: GeckoPool[], included: GeckoToken[] }
+  const pools: GeckoPool[] = (data.data || []).filter((d: any) => d.type === 'pool')
+  const included: GeckoToken[] = (data.included || []).filter((d: any) => d.type === 'token')
+
   const tokenMap = new Map<string, GeckoToken>()
   for (const token of included) {
     if (token.attributes) tokenMap.set(token.id, token)
   }
 
-  pools.forEach((pool) => {
-    const rawMcap = Number(pool.attributes.market_cap_usd)
+  for (const pool of pools) {
     const reserve = Number(pool.attributes.reserve_in_usd || 0)
-    if (reserve < SCOUT_CONFIG.MIN_LIQUIDITY) return
+    if (reserve < SCOUT_CONFIG.MIN_LIQUIDITY) continue
 
-    const mcap = rawMcap > 0
-      ? rawMcap
-      : reserve * SCOUT_CONFIG.MCAP_RESERVE_MULTIPLIER
+    // v3 does not include market_cap_usd; estimate from reserve
+    const mcap = reserve * SCOUT_CONFIG.MCAP_RESERVE_MULTIPLIER
+    if (mcap < SCOUT_CONFIG.MIN_MCAP || mcap > SCOUT_CONFIG.MAX_MCAP) continue
 
-    if (mcap < SCOUT_CONFIG.MIN_MCAP || mcap > SCOUT_CONFIG.MAX_MCAP) return
-
-    // Look up token social links from included data
     const tokenId = pool.relationships?.base_token?.data?.id
     const tokenData = tokenId ? tokenMap.get(tokenId) : undefined
 
+    // v3 pool name is "TOKEN / QUOTE", extract first part as ticker
+    const ticker = tokenData?.attributes?.symbol || pool.attributes.name.split(' / ')[0] || 'UNK'
+
     projects.push({
       name: pool.attributes.name,
-      ticker: pool.attributes.symbol || 'UNK',
+      ticker,
       chain: displayChain(geckoChain),
       mcap: Math.round(mcap),
       volume_24h: Number(pool.attributes.volume_usd?.h24 || 0),
-      price_change_24h: Number(pool.attributes.price_percent_change?.h24 || 0),
+      price_change_24h: Number(pool.attributes.price_percent_change_usd?.h24 || 0),
       reserve,
       poolSource: `GeckoTerminal ${endpoint} — ${pool.attributes.address}`,
       tokenAddress: tokenData?.attributes?.address || pool.attributes.address,
@@ -268,7 +275,7 @@ async function fetchGeckoPools(chain: string, endpoint: string): Promise<Project
       telegramHandle: tokenData?.attributes?.telegram_handle,
       websiteUrl: tokenData?.attributes?.websites?.[0]?.url,
     })
-  })
+  }
 
   return projects
 }

@@ -24,14 +24,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     )
 
     const telegramChatId = process.env.TELEGRAM_CHAT_ID || ''
-    const groupRequestMessage = await formatGroupJoinRequest(context, telegramChatId)
-
-    await sendGroupJoinRequest(leadId, context.projectName, groupRequestMessage)
+    if (!telegramChatId) {
+      console.warn('[Handoff] TELEGRAM_CHAT_ID not set — skipping notification')
+    } else {
+      const groupRequestMessage = await formatGroupJoinRequest(context, telegramChatId)
+      const result = await sendGroupJoinRequest(leadId, context.projectName, groupRequestMessage)
+      if (!result.ok) {
+        console.error(`[Handoff] Telegram send failed: ${result.error}`)
+      } else {
+        console.log(`[Handoff] Telegram sent (messageId: ${result.messageId})`)
+      }
+    }
 
     return res.status(200).json({
       ok: true,
       data: {
-        message: `Lead "${context.projectName}" handed off. HITL notified on Telegram to join groups.`,
+        message: `Lead "${context.projectName}" handed off${telegramChatId ? '. HITL notified on Telegram' : ''}.`,
         projectName: context.projectName,
         step: context.currentStep,
       },

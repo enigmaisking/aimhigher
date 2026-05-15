@@ -65,3 +65,202 @@ export async function setWebhook(url: string): Promise<boolean> {
     return false
   }
 }
+
+// ─── ENRICHMENT WORKFLOW MESSAGES ──────────────────────────────────────────
+
+export interface InlineButton {
+  text: string
+  callback_data: string
+}
+
+export async function sendMessageWithButtons(
+  chatId: string | number,
+  text: string,
+  buttons: InlineButton[][]
+): Promise<{ ok: boolean; messageId?: number; error?: string }> {
+  if (!BOT_TOKEN) {
+    console.warn('[Telegram] Missing TELEGRAM_BOT_TOKEN')
+    return { ok: false, error: 'TELEGRAM_BOT_TOKEN not configured' }
+  }
+
+  try {
+    const body: Record<string, any> = {
+      chat_id: chatId,
+      text,
+      parse_mode: 'Markdown',
+    }
+
+    if (buttons.length > 0) {
+      body.reply_markup = { inline_keyboard: buttons }
+    }
+
+    const response = await fetch(`${API_BASE}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    const data = await response.json()
+    if (!data.ok) {
+      return { ok: false, error: `Telegram API error: ${data.description}` }
+    }
+    return { ok: true, messageId: data.result?.message_id }
+  } catch (error: any) {
+    return { ok: false, error: error.message }
+  }
+}
+
+export async function sendTeamMessageWithButtons(
+  text: string,
+  buttons: InlineButton[][]
+): Promise<{ ok: boolean; messageId?: number; error?: string }> {
+  const chatId = process.env.TELEGRAM_CHAT_ID
+  if (!chatId) {
+    return { ok: false, error: 'TELEGRAM_CHAT_ID not configured' }
+  }
+  return sendMessageWithButtons(chatId, text, buttons)
+}
+
+/**
+ * Send enrichment workflow step 2: Request HITL to join group and follow X
+ */
+export async function sendGroupJoinRequest(
+  leadId: string,
+  _projectName: string,
+  message: string
+): Promise<{ ok: boolean; messageId?: number; error?: string }> {
+  const buttons: InlineButton[][] = [
+    [
+      {
+        text: '✅ Confirmed Joined',
+        callback_data: `enrich_group_confirmed_${leadId}`,
+      },
+      {
+        text: '⏭️ Skip',
+        callback_data: `enrich_skip_${leadId}`,
+      },
+    ],
+  ]
+
+  return sendTeamMessageWithButtons(message, buttons)
+}
+
+/**
+ * Send enrichment workflow step 4: Request HITL to review and approve draft
+ */
+export async function sendDraftForApproval(
+  leadId: string,
+  projectName: string,
+  outreachDraft: string,
+  onboardingDraft?: string
+): Promise<{ ok: boolean; messageId?: number; error?: string }> {
+  const draftSection = onboardingDraft
+    ? `
+*📝 Outreach Message:*
+\`\`\`
+${outreachDraft}
+\`\`\`
+
+*🎓 Onboarding Message:*
+\`\`\`
+${onboardingDraft}
+\`\`\`
+`
+    : `
+*📝 Outreach Message:*
+\`\`\`
+${outreachDraft}
+\`\`\`
+`
+
+  const message = [
+    `*✏️ Review Draft for ${projectName}*`,
+    ``,
+    `The LLM has generated a personalized outreach message based on the target audience profile.`,
+    draftSection,
+    ``,
+    `Please review and approve to send, or skip this lead.`,
+  ].join('\n')
+
+  const buttons: InlineButton[][] = [
+    [
+      {
+        text: '✅ Approve & Send',
+        callback_data: `enrich_draft_approve_${leadId}`,
+      },
+      {
+        text: '✏️ Edit Draft',
+        callback_data: `enrich_draft_edit_${leadId}`,
+      },
+    ],
+    [
+      {
+        text: '⏭️ Skip Lead',
+        callback_data: `enrich_skip_${leadId}`,
+      },
+    ],
+  ]
+
+  return sendTeamMessageWithButtons(message, buttons)
+}
+
+/**
+ * Send reminder if HITL hasn't completed enrichment step
+ */
+export async function sendEnrichmentReminder(
+  leadId: string,
+  projectName: string,
+  currentStep: string,
+  reminderCount: number
+): Promise<{ ok: boolean; messageId?: number; error?: string }> {
+  const steps: Record<string, string> = {
+    awaiting_group_join: 'join the project group and follow their X account',
+    running_profile_filter: 'confirm the audience profile analysis',
+    generating_draft: 'wait for draft generation',
+    awaiting_approval: 'review and approve the outreach draft',
+  }
+
+  const stepDescription = steps[currentStep] || 'complete the enrichment'
+  const message = `
+⏰ *Reminder: ${projectName}*
+
+You still need to ${stepDescription}.
+
+This is reminder #${reminderCount} for this lead.
+`.trim()
+
+  const buttons: InlineButton[][] = [
+    [
+      {
+        text: '👀 Review Now',
+        callback_data: `enrich_review_${leadId}`,
+      },
+      {
+        text: '⏭️ Skip',
+        callback_data: `enrich_skip_${leadId}`,
+      },
+    ],
+  ]
+
+  return sendTeamMessageWithButtons(message, buttons)
+}
+
+/**
+ * Send confirmation when enrichment completes
+ */
+export async function sendEnrichmentComplete(
+  projectName: string,
+  targetAudienceCount: number,
+  profileTags: string[]
+): Promise<{ ok: boolean; messageId?: number; error?: string }> {
+  const message = [
+    `✅ *Enrichment Complete: ${projectName}*`,
+    ``,
+    `📊 *Target Audience:* ${targetAudienceCount} high-value members identified`,
+    `🏷️ *Tags:* ${profileTags.join(', ')}`,
+    ``,
+    `The outreach draft has been generated and is ready for your review.`,
+  ].join('\n')
+
+  return sendTeamNotification(message)
+}

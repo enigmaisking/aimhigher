@@ -65,7 +65,7 @@ const SIGNAL_KEYWORDS: Record<ProfileTag, { weight: number; keywords: string[] }
   DEV:           { weight: 20, keywords: ['developer', 'engineer', 'solidity', 'smart contract', 'rust', 'audit'] },
 }
 
-const SCORE_THRESHOLDS = {
+export const SCORE_THRESHOLDS = {
   HIGH_VALUE: 60,
   MEDIUM_VALUE: 40,
 }

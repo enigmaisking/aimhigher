@@ -308,14 +308,38 @@ export default function HomePage() {
     setLeads((current) => current.map((lead) => lead.id === selectedLead.id ? { ...lead, stage } : lead))
   }
 
-  const handoffTo = (agent: AgentId) => {
+  const handoffTo = async (agent: AgentId) => {
     if (!selectedLead) return
     setActiveAgent(agent)
     if (agent === 'outreach') {
       setRecipient(selectedLead.recommendedRecipient)
       setPlatform(selectedLead.recommendedPlatform)
       setLeadStage('In conversation')
-      addAgentMessage('outreach', `Received ${selectedLead.name} from Scout. Pain point: ${selectedLead.painPoint}`)
+      addAgentMessage('outreach', `Handing off ${selectedLead.name} to enrichment pipeline...`)
+      addAgentMessage('outreach', `Pain point: ${selectedLead.painPoint}`)
+
+      try {
+        const res = await fetch('/api/handoff', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            leadId: selectedLead.id,
+            projectName: selectedLead.name,
+            contractAddress: selectedLead.tokenAddress || '',
+            chain: selectedLead.chain,
+            twitterHandle: selectedLead.twitterHandle || null,
+            telegramHandle: selectedLead.telegramHandle || null,
+          }),
+        })
+        const json = await res.json()
+        if (json.ok) {
+          addAgentMessage('outreach', `✅ ${json.data.message}`)
+        } else {
+          addAgentMessage('outreach', `❌ Handoff failed: ${json.error}`)
+        }
+      } catch (err: any) {
+        addAgentMessage('outreach', `❌ Handoff error: ${err.message}`)
+      }
     }
     if (agent === 'onboard') {
       setLeadStage('Onboarding')

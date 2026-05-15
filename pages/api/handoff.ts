@@ -12,8 +12,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const { enrichWithSocialLinks, formatGroupJoinRequest } = await import('../../src/lib/autonomy/lead-enrichment-handler')
-    const { sendGroupJoinRequest } = await import('../../src/lib/autonomy/telegram-client')
+    const { enrichWithSocialLinks, formatGroupJoinRequest, updateEnrichmentStep } = await import('../../src/lib/autonomy/lead-enrichment-handler')
+    const { sendGroupJoinRequest, sendDraftForApproval } = await import('../../src/lib/autonomy/telegram-client')
+    const { generateFullDraft } = await import('../../src/lib/autonomy/draft-generator')
 
     const context = await enrichWithSocialLinks(
       leadId,
@@ -24,24 +25,49 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     )
 
     const telegramChatId = process.env.TELEGRAM_CHAT_ID || ''
-    if (!telegramChatId) {
-      console.warn('[Handoff] TELEGRAM_CHAT_ID not set — skipping notification')
-    } else {
+
+    // If Telegram link exists → ask HITL to join group
+    // If no Telegram link → skip to draft generation using available social data
+    const hasTelegram = !!(context.socialLinks?.telegram)
+
+    if (hasTelegram && telegramChatId) {
       const groupRequestMessage = await formatGroupJoinRequest(context, telegramChatId)
       const result = await sendGroupJoinRequest(leadId, context.projectName, groupRequestMessage)
       if (!result.ok) {
         console.error(`[Handoff] Telegram send failed: ${result.error}`)
       } else {
-        console.log(`[Handoff] Telegram sent (messageId: ${result.messageId})`)
+        console.log(`[Handoff] Group join request sent (messageId: ${result.messageId})`)
       }
+    } else if (!hasTelegram && telegramChatId) {
+      console.log(`[Handoff] No Telegram link — generating draft directly`)
+      await updateEnrichmentStep(leadId, 'generating_draft')
+
+      const draftInput = {
+        projectName: context.projectName,
+        chain: context.chain,
+        painPoint: '',
+        hook: '',
+        verdict: 'LEAD',
+        targetAudienceTags: [] as string[],
+        targetAudienceCount: 0,
+        tokenTicker: ticker || '',
+        estimatedMcap: '',
+      }
+
+      const fullDraft = await generateFullDraft(leadId, draftInput)
+      await sendDraftForApproval(leadId, context.projectName, fullDraft.outreach, fullDraft.onboarding)
+
+      console.log(`[Handoff] Draft sent for approval: ${context.projectName}`)
     }
 
     return res.status(200).json({
       ok: true,
       data: {
-        message: `Lead "${context.projectName}" handed off${telegramChatId ? '. HITL notified on Telegram' : ''}.`,
+        message: hasTelegram
+          ? `Lead "${context.projectName}" handed off. HITL notified to join Telegram group.`
+          : `Lead "${context.projectName}" handed off. No Telegram found — draft sent for review.`,
         projectName: context.projectName,
-        step: context.currentStep,
+        step: hasTelegram ? context.currentStep : 'awaiting_approval',
       },
     })
   } catch (error: any) {

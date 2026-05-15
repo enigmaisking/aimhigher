@@ -255,6 +255,11 @@ async function fetchGeckoPools(chain: string, endpoint: string): Promise<Project
 
     if (mcap < SCOUT_CONFIG.MIN_MCAP || mcap > SCOUT_CONFIG.MAX_MCAP) return
 
+    // Filter out WETH pairs (e.g. "ELIEN / WETH") and test tokens
+    const poolName = pool.attributes.name.toLowerCase()
+    const tokenSymbol = tokenData?.attributes?.symbol?.toLowerCase() || ''
+    if (poolName.includes(' / weth') || poolName.includes('test') || tokenSymbol.includes('test')) return
+
     // Look up token social links from included data
     const tokenId = pool.relationships?.base_token?.data?.id
     const tokenData = tokenId ? tokenMap.get(tokenId) : undefined

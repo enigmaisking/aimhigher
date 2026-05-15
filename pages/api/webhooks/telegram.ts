@@ -12,20 +12,58 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next'
 
+// In-memory cache for scan results (lost on cold boot)
+const scanLeadCache = new Map<string, any>()
+
 const SCAN_CHAINS: Record<string, string[]> = {
   all: ['eth', 'solana', 'bsc', 'base', 'avax', 'arbitrum', 'optimism', 'polygon-pos', 'fantom'],
   evm: ['eth', 'bsc', 'base', 'avax', 'arbitrum', 'optimism', 'polygon-pos', 'fantom'],
   solana: ['solana'],
 }
 
+async function handleHandoff(leadId: string, chatId: number | string, botToken: string) {
+  const lead = scanLeadCache.get(leadId)
+  if (!lead) {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: '❌ Lead data not found in cache. Run /scan again.', parse_mode: 'Markdown' }),
+    })
+    return
+  }
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://aimhigher-one.vercel.app'
+  const handoffRes = await fetch(`${appUrl}/api/handoff`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      leadId: lead.id,
+      projectName: lead.name,
+      ticker: lead.ticker?.replace('$', ''),
+      contractAddress: lead.tokenAddress || '',
+      chain: lead.chain,
+    }),
+  })
+
+  const json = await handoffRes.json()
+  if (json.ok) {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: `✅ ${json.data.message}`, parse_mode: 'Markdown' }),
+    })
+  } else {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: `❌ Handoff failed: ${json.error}`, parse_mode: 'Markdown' }),
+    })
+  }
+}
+
 async function runScan(chatId: number | string, preset: string, botToken: string) {
   const chains = SCAN_CHAINS[preset] || SCAN_CHAINS.all
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://aimhigher-one.vercel.app'
 
-  // Notify user scan started
   await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
       text: `🔍 Scanning ${chains.length} chains (${preset})...`,
@@ -60,13 +98,18 @@ async function runScan(chatId: number | string, preset: string, botToken: string
     if (leads.length === 0) {
       await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: 'No qualifying leads found with current criteria.', parse_mode: 'Markdown' }),
+        body: JSON.stringify({ chat_id: chatId, text: 'No qualifying leads found.', parse_mode: 'Markdown' }),
       })
       return
     }
 
-    // Send top leads as formatted messages
+    // Cache scan results for handoff buttons
     const topLeads = leads.slice(0, 5)
+    for (const lead of topLeads) {
+      scanLeadCache.set(lead.id, lead)
+    }
+
+    // Send top leads with handoff button
     for (const lead of topLeads) {
       const msg = [
         `*${lead.name}* (${lead.ticker})`,
@@ -77,7 +120,16 @@ async function runScan(chatId: number | string, preset: string, botToken: string
 
       await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: 'Markdown' }),
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: msg,
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '🔗 Start Outreach', callback_data: `handoff_${lead.id}` },
+            ]],
+          },
+        }),
       })
     }
 
@@ -85,7 +137,7 @@ async function runScan(chatId: number | string, preset: string, botToken: string
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
-        text: `✅ Found ${leads.length} leads. ${leads.length > 5 ? `Showing top 5. Visit the dashboard for all ${leads.length}.` : ''}`,
+        text: `✅ Found ${leads.length} leads. ${leads.length > 5 ? `Showing top 5.` : ''}`,
         parse_mode: 'Markdown',
       }),
     })
@@ -121,6 +173,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ callback_query_id: cb.id, text: 'Scan started!', show_alert: false }),
+          })
+        }
+        return res.status(200).json({ ok: true })
+      }
+
+      // Handle handoff from /scan results
+      if (data.startsWith('handoff_') && botToken) {
+        const leadId = data.replace('handoff_', '')
+        const chatId = cb.message?.chat?.id || cb.from?.id
+        await handleHandoff(leadId, chatId, botToken)
+        if (botToken) {
+          await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ callback_query_id: cb.id, text: 'Outreach started!', show_alert: false }),
           })
         }
         return res.status(200).json({ ok: true })

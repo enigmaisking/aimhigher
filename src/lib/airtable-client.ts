@@ -115,11 +115,21 @@ export const airtableClient = {
     }
 
     Object.entries(fieldMap).forEach(([key, airtableField]) => {
-      const value = lead[key]
+      let value = lead[key]
       
       // Skip if not provided or should be skipped
       if (SKIP_FIELDS.has(airtableField)) return
       if (value === undefined || value === null || value === '') return
+      
+      // Normalize chain to lowercase (Airtable select field)
+      if (airtableField === 'chain') {
+        value = String(value).toLowerCase().trim()
+      }
+      
+      // Clean token_ticker: strip $ prefix and  / suffix
+      if (airtableField === 'token_ticker') {
+        value = String(value).replace(/^\$/, '').replace(/\/.*$/, '').trim()
+      }
       
       // Type coercion
       if (airtableField === 'fit_score') {
@@ -173,9 +183,10 @@ export const airtableClient = {
     if (!AIRTABLE_LEADS_TABLE_ID) return null
     try {
       const safeName = projectName.replace(/"/g, '\\"')
+      const safeChain = chain.toLowerCase().trim()
       const response = await fetchAirtable(
         'GET',
-        `/${AIRTABLE_LEADS_TABLE_ID}?filterByFormula=AND({project_name}="${safeName}",{chain}="${chain}")&maxRecords=1`
+        `/${AIRTABLE_LEADS_TABLE_ID}?filterByFormula=AND({project_name}="${safeName}",{chain}="${safeChain}")&maxRecords=1`
       )
       return response.records?.[0] || null
     } catch (err) {
@@ -191,6 +202,7 @@ export const airtableClient = {
     Object.entries(updates).forEach(([key, value]) => {
       if (SKIP_FIELDS.has(key)) return
       if (value !== undefined && value !== null && value !== '') {
+        if (key === 'chain') value = String(value).toLowerCase().trim()
         fields[key] = value
       }
     })

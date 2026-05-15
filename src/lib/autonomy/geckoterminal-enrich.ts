@@ -40,41 +40,34 @@ export async function fetchGeckoTerminalSocialLinks(
 
     const normalizedAddress = contractAddress.toLowerCase()
 
-    // Try tokens endpoint first, then pools as fallback
-    const urls = [
-      `https://api.geckoterminal.com/api/v3/networks/${networkId}/tokens/${normalizedAddress}`,
-      `https://api.geckoterminal.com/api/v3/networks/${networkId}/pools/${normalizedAddress}`,
-    ]
+    // Use v2 API for social links
+    const url = `https://api.geckoterminal.com/api/v2/networks/${networkId}/tokens/${normalizedAddress}`
+    console.log(`[GeckoTerminal] Fetching social links from: ${url}`)
 
-    for (const url of urls) {
-      console.log(`[GeckoTerminal] Fetching from: ${url}`)
-      const response = await fetch(url, {
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'XAim-Autonomy/1.0',
-        },
-      })
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'XAim-Autonomy/1.0',
+      },
+    })
 
-      if (!response.ok) {
-        console.warn(`[GeckoTerminal] ${url} returned ${response.status}`)
-        continue
-      }
-
-      const data = await response.json()
-      const item = data.data
-      if (!item || !item.attributes) {
-        console.warn(`[GeckoTerminal] No data at ${url}`)
-        continue
-      }
-
-      const attrs = item.attributes
-      const socialLinks = extractSocialLinks(attrs)
-      console.log(`[GeckoTerminal] Found social links:`, socialLinks)
-      return socialLinks
+    if (!response.ok) {
+      console.warn(`[GeckoTerminal] API error: ${response.status} ${response.statusText}`)
+      return {}
     }
 
-    console.warn(`[GeckoTerminal] No data found for ${contractAddress} on ${chain} (tried tokens + pools)`)
-    return {}
+    const data = await response.json()
+
+    if (!data.data || !data.data.attributes) {
+      console.warn(`[GeckoTerminal] No data found for ${contractAddress} on ${chain}`)
+      return {}
+    }
+
+    const attrs = data.data.attributes
+    const socialLinks = extractSocialLinks(attrs)
+
+    console.log(`[GeckoTerminal] Found social links:`, socialLinks)
+    return socialLinks
   } catch (error: any) {
     console.error(`[GeckoTerminal] Error fetching social links:`, error.message)
     return {}

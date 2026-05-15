@@ -75,7 +75,7 @@ const SCOUT_CONFIG = {
   MAX_MCAP: 5000000,
   MIN_LIQUIDITY: 2500,
   LEAD_SCORE_THRESHOLD: 7,
-  RATE_LIMIT_DELAY: 2200,
+  RATE_LIMIT_DELAY: 6000,
   MAX_RETRIES: 3,
   // When GeckoTerminal doesn't return market_cap_usd, estimate from reserve
   MCAP_RESERVE_MULTIPLIER: 25,
@@ -104,6 +104,29 @@ const DEFAULT_CHAINS = ['eth', 'solana', 'bsc', 'base', 'avax', 'polygon-pos', '
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function sleepJitter(ms: number) {
+  const jitter = Math.random() * 3000 + 1000
+  return sleep(ms + jitter)
+}
+
+const DEXSCREENER_CHAIN_MAP: Record<string, string> = {
+  eth: 'ethereum',
+  ethereum: 'ethereum',
+  sol: 'solana',
+  solana: 'solana',
+  base: 'base',
+  arbitrum: 'arbitrum',
+  polygon: 'polygon',
+  'polygon-pos': 'polygon',
+  bnb: 'bsc',
+  bsc: 'bsc',
+  avax: 'avalanche',
+  avalanche: 'avalanche',
+  optimism: 'optimism',
+  fantom: 'fantom',
+  ftm: 'fantom',
 }
 
 function formatUsd(value: number) {
@@ -224,6 +247,81 @@ function scoreProject(project: Project, sources: LeadSource[]): ScoreBreakdown {
   return { eligibility, painSignal: Number(painSignal.toFixed(1)), poolFit: Number(poolFit.toFixed(1)), communityGap: Number(communityGap.toFixed(1)), confidence: Number(confidence.toFixed(1)), total }
 }
 
+// ─── DEXSCREENER FALLBACK ───────────────────────────────────────────────────
+// Used when GeckoTerminal rate-limits. No API key needed.
+
+async function fetchDexScreenerProjects(): Promise<Project[]> {
+  try {
+    const res = await fetch('https://api.dexscreener.com/token-profiles/latest/v1', {
+      headers: { 'User-Agent': 'AimHigherScout/1.0' },
+      signal: AbortSignal.timeout(10000),
+    })
+    if (!res.ok) return []
+
+    const profiles = await res.json()
+    if (!Array.isArray(profiles)) return []
+
+    const projects: Project[] = []
+    for (const profile of profiles.slice(0, 50)) {
+      const chainId = profile.chainId?.toLowerCase()
+      if (!chainId || !Object.values(DEXSCREENER_CHAIN_MAP).includes(chainId)) continue
+
+      const links = profile.links || []
+      const findLink = (type: string) => links.find((l: any) => l.type === type)?.url || null
+
+      // Fetch pair data for this token to get mcap/volume/liquidity
+      try {
+        await sleepJitter(500)
+        const pairRes = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${profile.tokenAddress}`, {
+          headers: { 'User-Agent': 'AimHigherScout/1.0' },
+          signal: AbortSignal.timeout(8000),
+        })
+        if (!pairRes.ok) continue
+        const pairData = await pairRes.json()
+        const pairs = pairData.pairs || []
+        const chainPair = pairs.find((p: any) => p.chainId?.toLowerCase() === chainId)
+        if (!chainPair) continue
+
+        const liquidity = Number(chainPair.liquidity?.usd || 0)
+        const volume24h = Number(chainPair.volume?.h24 || 0)
+        const mcap = Number(chainPair.fdv || chainPair.marketCap || 0)
+        const priceChange = Number(chainPair.priceChange?.h24 || 0)
+        const pairAddress = chainPair.pairAddress || ''
+
+        if (liquidity < SCOUT_CONFIG.MIN_LIQUIDITY) continue
+        if (mcap > 0 && (mcap < SCOUT_CONFIG.MIN_MCAP || mcap > SCOUT_CONFIG.MAX_MCAP)) continue
+
+        // Map DexScreener chain back to our chain format
+        const ourChain = Object.entries(DEXSCREENER_CHAIN_MAP).find(([, v]) => v === chainId)?.[0] || chainId
+
+        projects.push({
+          name: profile.description?.slice(0, 60) || chainPair.baseToken?.name || chainPair.baseToken?.symbol || 'Unknown',
+          ticker: chainPair.baseToken?.symbol || 'UNK',
+          chain: displayChain(ourChain),
+          mcap: Math.round(mcap) || Math.round(liquidity * 25),
+          volume_24h: Math.round(volume24h),
+          price_change_24h: priceChange,
+          reserve: Math.round(liquidity),
+          poolSource: `DexScreener — ${pairAddress}`,
+          tokenAddress: profile.tokenAddress,
+          twitterHandle: findLink('twitter'),
+          telegramHandle: findLink('telegram'),
+          websiteUrl: findLink('website'),
+          discordUrl: findLink('discord'),
+          email: findLink('email') || undefined,
+        })
+      } catch {
+        continue
+      }
+    }
+    return projects
+  } catch {
+    return []
+  }
+}
+
+let geckoRateLimited = false
+
 async function fetchGeckoPools(chain: string, endpoint: string): Promise<Project[]> {
   const projects: Project[] = []
   const geckoChain = normalizeChain(chain)
@@ -241,6 +339,7 @@ async function fetchGeckoPools(chain: string, endpoint: string): Promise<Project
       await sleep(backoff)
       continue
     }
+    if (response.status === 429) geckoRateLimited = true
     console.warn(`[Scout] ${geckoChain}/${endpoint}: ${response.status}`)
     return projects
   }
@@ -303,7 +402,7 @@ async function gatherGeckoSignals(chains: string[]): Promise<Project[]> {
   for (const chain of chains) {
     for (const endpoint of endpoints) {
       try {
-        await sleep(SCOUT_CONFIG.RATE_LIMIT_DELAY)
+        await sleepJitter(SCOUT_CONFIG.RATE_LIMIT_DELAY)
         const batch = await fetchGeckoPools(chain, endpoint)
         for (const p of batch) {
           const key = `${p.ticker}-${p.chain}`.toLowerCase()
@@ -314,6 +413,19 @@ async function gatherGeckoSignals(chains: string[]): Promise<Project[]> {
         }
       } catch (error) {
         console.warn(`[Scout] ${endpoint} failed for ${chain}:`, error)
+      }
+    }
+  }
+
+  // Fall back to DexScreener if GeckoTerminal was rate-limited
+  if (geckoRateLimited && projects.length < 3) {
+    console.log('[Scout] GeckoTerminal rate-limited, falling back to DexScreener token profiles')
+    const dexProjects = await fetchDexScreenerProjects()
+    for (const p of dexProjects) {
+      const key = `${p.ticker}-${p.chain}`.toLowerCase()
+      if (!seen.has(key)) {
+        seen.add(key)
+        projects.push(p)
       }
     }
   }
@@ -420,6 +532,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     manualSignals?: string[]
   }
 
+  geckoRateLimited = false
   const liveProjects = await gatherGeckoSignals(chains.length ? chains : DEFAULT_CHAINS)
 
   // Only scrape websites for projects missing ALL social links

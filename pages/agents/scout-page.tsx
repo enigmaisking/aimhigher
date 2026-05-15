@@ -5,20 +5,24 @@ import React, { useState } from 'react'
 import { Button, Card, Badge, Select, Spinner } from '../../src/components/shared'
 
 interface Lead {
-  rank: number
-  project_name: string
-  token_ticker: string
+  id: string
+  name: string
+  ticker: string
   chain: string
-  fit_score: number
+  vertical: string
+  score: number
   verdict: 'PREMIUM' | 'LEAD'
-  pain_point: string
+  stage: string
+  mcap: string
+  treasury: string
+  painPoint: string
   hook: string
-  contact_handle: string
-  engagement_gap_ratio: number
+  nextAction: string
   twitterHandle?: string | null
   telegramHandle?: string | null
   websiteUrl?: string | null
   discordUrl?: string | null
+  confidence: number
 }
 
 export default function ScoutPage() {
@@ -152,32 +156,32 @@ export default function ScoutPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {leads.map((lead) => (
               <Card
-                key={`${lead.project_name}-${lead.chain}`}
+                key={lead.id}
                 variant={lead.verdict === 'PREMIUM' ? 'premium' : 'default'}
                 className="flex flex-col justify-between"
               >
                 {/* Header */}
                 <div className="flex justify-between items-start mb-4">
                   <div>
-                    <div className="text-xl font-semibold">{lead.project_name}</div>
+                    <div className="text-xl font-semibold">{lead.name}</div>
                     <div className="text-xs text-[#00FF88] font-mono font-semibold">
-                      {lead.token_ticker}
+                      {lead.ticker}
                     </div>
                   </div>
                   <Badge variant={lead.verdict === 'PREMIUM' ? 'premium' : 'lead'}>
-                    {lead.fit_score.toFixed(1)}
+                    {lead.score.toFixed(1)}
                   </Badge>
                 </div>
 
                 {/* Tags */}
                 <div className="flex gap-2 flex-wrap mb-4">
                   <Badge variant="chain">{lead.chain}</Badge>
-                  <Badge variant="default">{lead.contact_handle}</Badge>
+                  <Badge variant="default">{lead.vertical}</Badge>
                 </div>
 
                 {/* Pain Point */}
                 <p className="text-sm text-[#F59E0B] mb-3 font-mono font-medium">
-                  ⚡ {lead.pain_point}
+                  ⚡ {lead.painPoint}
                 </p>
 
                 {/* Hook */}

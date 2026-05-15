@@ -63,6 +63,8 @@ interface CachedLead {
   lastContacted?: number | null
   twitterHandle?: string | null
   telegramHandle?: string | null
+  websiteUrl?: string | null
+  discordUrl?: string | null
   // Aliases for notifyPremiumLead / dispatchDM compatibility
   score?: number
   name?: string
@@ -139,6 +141,10 @@ async function onScanComplete(event: AutonomyEvent): Promise<void> {
         contact_handle: lead.contact_handle,
         verdict: lead.verdict,
         source_signal: lead.source_signal,
+        twitterHandle: lead.twitterHandle,
+        telegramHandle: lead.telegramHandle,
+        websiteUrl: lead.websiteUrl,
+        discordUrl: lead.discordUrl,
       })
       if (lead.verdict === 'PREMIUM') premiumCount++
     }
@@ -178,6 +184,8 @@ async function onLeadFound(event: AutonomyEvent): Promise<void> {
     painPoint: (payload.pain_point as string) || '',
     twitterHandle: (payload.twitterHandle as string) || (payload.contact_handle as string)?.replace('@', '') || null,
     telegramHandle: (payload.telegramHandle as string) || null,
+    websiteUrl: (payload.websiteUrl as string) || null,
+    discordUrl: (payload.discordUrl as string) || null,
     tokenAddress: (payload.contract_address as string) || null,
   }
 

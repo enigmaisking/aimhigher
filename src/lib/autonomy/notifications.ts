@@ -36,6 +36,8 @@ export async function notifyPremiumLead(lead: {
   painPoint: string
   twitterHandle?: string | null
   telegramHandle?: string | null
+  websiteUrl?: string | null
+  discordUrl?: string | null
   tokenAddress?: string | null
 }): Promise<void> {
   const msg = [
@@ -46,10 +48,13 @@ export async function notifyPremiumLead(lead: {
     `*Pain point:*`,
     lead.painPoint,
     ``,
+    `*Social links:*`,
   ]
 
-  if (lead.twitterHandle) msg.push(`Twitter: @${lead.twitterHandle}`)
-  if (lead.telegramHandle) msg.push(`Telegram: @${lead.telegramHandle}`)
+  if (lead.twitterHandle) msg.push(`🐦 X: ${lead.twitterHandle}`)
+  if (lead.telegramHandle) msg.push(`✈️ Telegram: ${lead.telegramHandle}`)
+  if (lead.websiteUrl) msg.push(`🌐 Website: ${lead.websiteUrl}`)
+  if (lead.discordUrl) msg.push(`💬 Discord: ${lead.discordUrl}`)
   if (lead.tokenAddress) msg.push(`Token: ${lead.tokenAddress.slice(0, 20)}...`)
 
   const result = await sendTeamNotification(msg.join('\n'))
@@ -72,13 +77,24 @@ export async function sendLeadForReview(lead: {
   contact_handle: string
   verdict: string
   source_signal: string
+  twitterHandle?: string | null
+  telegramHandle?: string | null
+  websiteUrl?: string | null
+  discordUrl?: string | null
 }): Promise<{ ok: boolean; error?: string }> {
   const verdictEmoji = lead.verdict === 'PREMIUM' ? '🥇' : '🥈'
+  const socialLines: string[] = []
+  if (lead.twitterHandle) socialLines.push(`🐦 X: ${lead.twitterHandle}`)
+  if (lead.telegramHandle) socialLines.push(`✈️ Telegram: ${lead.telegramHandle}`)
+  if (lead.websiteUrl) socialLines.push(`🌐 Website: ${lead.websiteUrl}`)
+  if (lead.discordUrl) socialLines.push(`💬 Discord: ${lead.discordUrl}`)
+
   const text = [
     `${verdictEmoji} *${lead.verdict} LEAD: ${lead.project_name}*`,
     `Ticker: \`${lead.token_ticker}\`  |  Score: *${lead.fit_score}/10*`,
     `Chain: ${lead.chain}  |  Mcap: ${lead.estimated_mcap}`,
     ``,
+    socialLines.length > 0 ? `*Social:* ${socialLines.join(' · ')}` : '',
     `*Pain point:*`,
     lead.pain_point ? `> ${lead.pain_point.slice(0, 300)}` : '_None captured_',
     ``,
@@ -87,7 +103,7 @@ export async function sendLeadForReview(lead: {
     ``,
     `Contact: ${lead.contact_handle || '_Unknown_'}`,
     `Signal: ${lead.source_signal || 'Scout scan'}`,
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 
   const chatId = process.env.TELEGRAM_CHAT_ID
   if (!chatId) return { ok: false, error: 'TELEGRAM_CHAT_ID not configured' }

@@ -15,6 +15,10 @@ interface Lead {
   hook: string
   contact_handle: string
   engagement_gap_ratio: number
+  twitterHandle?: string | null
+  telegramHandle?: string | null
+  websiteUrl?: string | null
+  discordUrl?: string | null
 }
 
 export default function ScoutPage() {
@@ -175,6 +179,38 @@ export default function ScoutPage() {
                 <p className="text-sm text-[#F59E0B] mb-3 font-mono font-medium">
                   ⚡ {lead.pain_point}
                 </p>
+
+                {/* Social Links */}
+                <div className="flex gap-2 flex-wrap mb-3">
+                  {lead.twitterHandle && (
+                    <a href={lead.twitterHandle.startsWith('http') ? lead.twitterHandle : `https://twitter.com/${lead.twitterHandle}`}
+                       target="_blank" rel="noopener noreferrer"
+                       className="text-xs text-[#1DA1F2] hover:underline">
+                      𝕏 / Twitter
+                    </a>
+                  )}
+                  {lead.telegramHandle && (
+                    <a href={lead.telegramHandle.startsWith('http') ? lead.telegramHandle : `https://t.me/${lead.telegramHandle}`}
+                       target="_blank" rel="noopener noreferrer"
+                       className="text-xs text-[#0088CC] hover:underline">
+                      ✈️ Telegram
+                    </a>
+                  )}
+                  {lead.websiteUrl && (
+                    <a href={lead.websiteUrl.startsWith('http') ? lead.websiteUrl : `https://${lead.websiteUrl}`}
+                       target="_blank" rel="noopener noreferrer"
+                       className="text-xs text-[#A0A0B0] hover:underline">
+                      🌐 Website
+                    </a>
+                  )}
+                  {lead.discordUrl && (
+                    <a href={lead.discordUrl.startsWith('http') ? lead.discordUrl : `https://discord.gg/${lead.discordUrl}`}
+                       target="_blank" rel="noopener noreferrer"
+                       className="text-xs text-[#5865F2] hover:underline">
+                      💬 Discord
+                    </a>
+                  )}
+                </div>
 
                 {/* Hook */}
                 <p className="text-sm text-[#A0A0B0] mb-4 leading-relaxed flex-1">

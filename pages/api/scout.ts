@@ -50,6 +50,7 @@ interface Project {
   twitterHandle?: string
   telegramHandle?: string
   websiteUrl?: string
+  discordUrl?: string
 }
 
 interface LeadSource {
@@ -255,11 +256,6 @@ async function fetchGeckoPools(chain: string, endpoint: string): Promise<Project
 
     if (mcap < SCOUT_CONFIG.MIN_MCAP || mcap > SCOUT_CONFIG.MAX_MCAP) return
 
-    // Filter out WETH pairs (e.g. "ELIEN / WETH") and test tokens
-    const poolName = pool.attributes.name.toLowerCase()
-    const tokenSymbol = tokenData?.attributes?.symbol?.toLowerCase() || ''
-    if (poolName.includes(' / weth') || poolName.includes('test') || tokenSymbol.includes('test')) return
-
     // Look up token social links from included data
     const tokenId = pool.relationships?.base_token?.data?.id
     const tokenData = tokenId ? tokenMap.get(tokenId) : undefined
@@ -277,6 +273,7 @@ async function fetchGeckoPools(chain: string, endpoint: string): Promise<Project
       twitterHandle: tokenData?.attributes?.twitter_handle,
       telegramHandle: tokenData?.attributes?.telegram_handle,
       websiteUrl: tokenData?.attributes?.websites?.[0]?.url,
+      discordUrl: tokenData?.attributes?.discord_url,
     })
   })
 
@@ -309,6 +306,72 @@ async function gatherGeckoSignals(chains: string[]): Promise<Project[]> {
   return projects
 }
 
+// ─── WEBSITE SOCIAL LINK SCRAPER ─────────────────────────────────────────────
+// Fallback: if GeckoTerminal didn't return X/Telegram/Discord, scrape the
+// project website to find them before dismissing the lead.
+
+interface ScrapedSocialLinks {
+  twitter?: string
+  telegram?: string
+  discord?: string
+}
+
+async function scrapeWebsiteForSocialLinks(websiteUrl: string): Promise<ScrapedSocialLinks> {
+  try {
+    const response = await fetch(websiteUrl, {
+      headers: { 'User-Agent': 'AimHigherScout/1.0' },
+      signal: AbortSignal.timeout(6000),
+    })
+    if (!response.ok) return {}
+
+    const html = await response.text()
+    const links: ScrapedSocialLinks = {}
+
+    // Match X/Twitter URLs in href attributes or text content
+    const twitterPatterns = [
+      /https?:\/\/(?:www\.)?(?:twitter\.com|x\.com)\/[a-zA-Z0-9_]+(?:\/[a-zA-Z0-9_]+)?(?=["'\s>)/])/g,
+      /href=["']https?:\/\/(?:www\.)?(?:twitter\.com|x\.com)\/([a-zA-Z0-9_]+)["']/g,
+    ]
+    for (const pattern of twitterPatterns) {
+      const match = html.match(pattern)
+      if (match) {
+        links.twitter = match[0].replace(/^href=["']|["']$/g, '')
+        break
+      }
+    }
+
+    // Match Telegram URLs
+    const tgPatterns = [
+      /https?:\/\/(?:www\.)?t\.me\/(?:joinchat\/)?[a-zA-Z0-9_]+(?=["'\s>)/])/g,
+      /href=["']https?:\/\/(?:www\.)?t\.me\/([a-zA-Z0-9_]+)["']/g,
+    ]
+    for (const pattern of tgPatterns) {
+      const match = html.match(pattern)
+      if (match) {
+        links.telegram = match[0].replace(/^href=["']|["']$/g, '')
+        break
+      }
+    }
+
+    // Match Discord URLs
+    const discordPatterns = [
+      /https?:\/\/(?:www\.)?discord\.(?:gg|com\/invite|app\.com\/invite)\/[a-zA-Z0-9_]+(?=["'\s>)/])/g,
+      /href=["']https?:\/\/(?:www\.)?discord\.(?:gg|com\/invite|app\.com\/invite)\/([a-zA-Z0-9_]+)["']/g,
+    ]
+    for (const pattern of discordPatterns) {
+      const match = html.match(pattern)
+      if (match) {
+        links.discord = match[0].replace(/^href=["']|["']$/g, '')
+        break
+      }
+    }
+
+    return links
+  } catch {
+    return {}
+  }
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' })
 
@@ -332,7 +395,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const liveProjects = await gatherGeckoSignals(chains.length ? chains : DEFAULT_CHAINS)
 
-  const leads = liveProjects
+  // Before filtering, scrape websites for projects missing X or Telegram
+  // This catches social links from the project website that GeckoTerminal missed
+  const scrapePromises = liveProjects.map(async (p) => {
+    if (!p.twitterHandle && !p.telegramHandle && p.websiteUrl) {
+      const scraped = await scrapeWebsiteForSocialLinks(p.websiteUrl)
+      if (scraped.twitter && !p.twitterHandle) p.twitterHandle = scraped.twitter
+      if (scraped.telegram && !p.telegramHandle) p.telegramHandle = scraped.telegram
+      if (scraped.discord && !p.discordUrl) p.discordUrl = scraped.discord
+    }
+  })
+  await Promise.all(scrapePromises)
+  console.log(`[Scout] Website scrape fallback completed for ${liveProjects.length} projects`)
+
+  // Filter: only keep projects with X or Telegram link, OR a website to check
+  // Projects with no X, no Telegram, AND no website are excluded as leads
+  const projectsWithSocial: Project[] = []
+  const projectsNoSocial: Project[] = []
+
+  for (const p of liveProjects) {
+    if (p.twitterHandle || p.telegramHandle || p.websiteUrl) {
+      projectsWithSocial.push(p)
+    } else {
+      projectsNoSocial.push(p)
+    }
+  }
+
+  const leads = projectsWithSocial
     .map((project) => {
       const sources = buildSources(project, sourceTypes, manualSignals)
       const scoreBreakdown = scoreProject(project, sources)
@@ -358,6 +447,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         twitterHandle: project.twitterHandle || null,
         telegramHandle: project.telegramHandle || null,
         websiteUrl: project.websiteUrl || null,
+        discordUrl: project.discordUrl || null,
         sources,
         scoreBreakdown,
         confidence: Number((scoreBreakdown.confidence / 1.5).toFixed(2)),
@@ -370,6 +460,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     .filter(lead => !verticals.length || verticals.includes(lead.vertical))
     .sort((a, b) => b.score - a.score)
 
+  // Build no-social leads list for potential manual outreach
+  // When known founders/KOLs are involved, outreach can still target them
+  // referencing the project with no social data
+  const noSocialLeads = projectsNoSocial.map((p) => ({
+    id: `${p.ticker}-${p.chain}`.replace(/[^a-z0-9]+/gi, '-').toLowerCase(),
+    name: p.name,
+    ticker: p.ticker.startsWith('$') ? p.ticker : `$${p.ticker}`,
+    chain: p.chain,
+    tokenAddress: p.tokenAddress,
+    poolSource: p.poolSource,
+    mcap: formatUsd(p.mcap),
+    treasury: formatUsd(p.reserve),
+    noSocialData: true,
+    nextAction: 'Hand off to Outreach with known founder/KOL contacts (no social links available).',
+    twitterHandle: null,
+    telegramHandle: null,
+    websiteUrl: null,
+    discordUrl: null,
+  }))
+
   const start = (Math.max(1, page) - 1) * pageSize
   const pagedLeads = leads.slice(start, start + pageSize)
 
@@ -377,6 +487,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     ok: true,
     data: {
       leads: pagedLeads,
+      noSocialLeads,
       total: leads.length,
       page,
       pageSize,

@@ -1,11 +1,25 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 
+interface TargetIndividual {
+  name: string
+  role: 'founder' | 'kol' | 'dev' | 'admin' | 'community_lead' | 'alpha' | 'influencer'
+  handle?: string
+  notes?: string
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ ok: false, error: 'Method not allowed' })
   }
 
-  const { leadId, projectName, ticker, contractAddress, chain } = req.body
+  const { leadId, projectName, ticker, contractAddress, chain, targetIndividuals } = req.body as {
+    leadId: string
+    projectName?: string
+    ticker?: string
+    contractAddress?: string
+    chain?: string
+    targetIndividuals?: TargetIndividual[]
+  }
 
   if (!leadId) {
     return res.status(400).json({ ok: false, error: 'leadId is required' })
@@ -25,12 +39,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     )
 
     const telegramChatId = process.env.TELEGRAM_CHAT_ID || ''
-
-    // If Telegram link exists → ask HITL to join group
-    // If no Telegram link → skip to draft generation using available social data
     const hasTelegram = !!(context.socialLinks?.telegram)
 
+    // Derive target audience info from provided individuals or enrichment context
+    const targetTags = (targetIndividuals || []).map((t) => {
+      const roleToTag: Record<string, string> = {
+        founder: 'FOUNDER',
+        kol: 'KOL',
+        dev: 'DEV',
+        admin: 'ADMIN',
+        community_lead: 'COMMUNITY_LEAD',
+        alpha: 'ALPHA',
+        influencer: 'INFLUENCER',
+      }
+      return roleToTag[t.role] || 'COMMUNITY_LEAD'
+    })
+
     if (hasTelegram && telegramChatId) {
+      // Normal path: has Telegram → ask HITL to join group
       const groupRequestMessage = await formatGroupJoinRequest(context, telegramChatId)
       const result = await sendGroupJoinRequest(leadId, context.projectName, groupRequestMessage)
       if (!result.ok) {
@@ -38,36 +64,49 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       } else {
         console.log(`[Handoff] Group join request sent (messageId: ${result.messageId})`)
       }
-    } else if (!hasTelegram && telegramChatId) {
-      console.log(`[Handoff] No Telegram link — generating draft directly`)
-      await updateEnrichmentStep(leadId, 'generating_draft')
 
-      const draftInput = {
-        projectName: context.projectName,
-        chain: context.chain,
-        painPoint: '',
-        hook: '',
-        verdict: 'LEAD',
-        targetAudienceTags: [] as string[],
-        targetAudienceCount: 0,
-        tokenTicker: ticker || '',
-        estimatedMcap: '',
-      }
-
-      const fullDraft = await generateFullDraft(leadId, draftInput)
-      await sendDraftForApproval(leadId, context.projectName, fullDraft.outreach, context.socialLinks)
-
-      console.log(`[Handoff] Draft sent for approval: ${context.projectName}`)
+      return res.status(200).json({
+        ok: true,
+        data: {
+          message: `Lead "${context.projectName}" handed off. HITL notified to join Telegram group.`,
+          projectName: context.projectName,
+          step: context.currentStep,
+        },
+      })
     }
+
+    // No Telegram link — generate draft directly
+    // If known founders/KOLs were provided as target individuals, 
+    // include them in the draft so outreach targets their specific role
+    console.log(`[Handoff] No Telegram link — generating draft${targetIndividuals?.length ? ` for ${targetIndividuals.length} known individuals` : ''}`)
+    await updateEnrichmentStep(leadId, 'generating_draft')
+
+    const draftInput = {
+      projectName: context.projectName,
+      chain: context.chain,
+      painPoint: (context as any)?.painPoint || '',
+      hook: (context as any)?.hook || '',
+      verdict: 'LEAD',
+      targetAudienceTags: targetTags.length > 0 ? targetTags : [],
+      targetAudienceCount: targetIndividuals?.length || 0,
+      tokenTicker: ticker || '',
+      estimatedMcap: '',
+    }
+
+    const fullDraft = await generateFullDraft(leadId, draftInput)
+    await sendDraftForApproval(leadId, context.projectName, fullDraft.outreach, context.socialLinks)
+
+    console.log(`[Handoff] Draft sent for approval: ${context.projectName}`)
 
     return res.status(200).json({
       ok: true,
       data: {
-        message: hasTelegram
-          ? `Lead "${context.projectName}" handed off. HITL notified to join Telegram group.`
-          : `Lead "${context.projectName}" handed off. No Telegram found — draft sent for review.`,
+        message: targetIndividuals?.length
+          ? `Lead "${context.projectName}" has no social links. Draft generated targeting ${targetIndividuals.length} known individual(s) for manual outreach.`
+          : `Lead "${context.projectName}" has no social links. No target individuals provided — basic draft sent for review. Add known founders/KOLs to personalize outreach.`,
         projectName: context.projectName,
-        step: hasTelegram ? context.currentStep : 'awaiting_approval',
+        step: 'awaiting_approval',
+        targetCount: targetIndividuals?.length || 0,
       },
     })
   } catch (error: any) {

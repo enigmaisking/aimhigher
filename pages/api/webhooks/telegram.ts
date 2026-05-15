@@ -94,52 +94,101 @@ async function runScan(chatId: number | string, preset: string, botToken: string
 
     const { data } = await scoutRes.json()
     const leads = data?.leads || []
+    const noSocialLeads = data?.noSocialLeads || []
 
-    if (leads.length === 0) {
-      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: 'No qualifying leads found.', parse_mode: 'Markdown' }),
-      })
-      return
-    }
+    // Show regular leads
+    if (leads.length > 0) {
+      const topLeads = leads.slice(0, 5)
+      for (const lead of topLeads) {
+        scanLeadCache.set(lead.id, lead)
+      }
 
-    // Cache scan results for handoff buttons
-    const topLeads = leads.slice(0, 5)
-    for (const lead of topLeads) {
-      scanLeadCache.set(lead.id, lead)
-    }
+      for (const lead of topLeads) {
+        const socialLinks: string[] = []
+        if (lead.twitterHandle) socialLinks.push(`🐦 [X](${lead.twitterHandle.startsWith('http') ? lead.twitterHandle : `https://twitter.com/${lead.twitterHandle}`})`)
+        if (lead.telegramHandle) socialLinks.push(`✈️ [Telegram](${lead.telegramHandle.startsWith('http') ? lead.telegramHandle : `https://t.me/${lead.telegramHandle}`})`)
+        if (lead.websiteUrl) socialLinks.push(`🌐 [Website](${lead.websiteUrl.startsWith('http') ? lead.websiteUrl : `https://${lead.websiteUrl}`})`)
+        if (lead.discordUrl) socialLinks.push(`💬 [Discord](${lead.discordUrl.startsWith('http') ? lead.discordUrl : `https://discord.gg/${lead.discordUrl}`})`)
 
-    // Send top leads with handoff button
-    for (const lead of topLeads) {
-      const msg = [
-        `*${lead.name}* (${lead.ticker})`,
-        `Chain: ${lead.chain} · Score: ${lead.score}/10`,
-        `Mcap: ${lead.mcap} · Pain: ${lead.painPoint}`,
-        `Contract: \`${lead.tokenAddress || 'N/A'}\``,
-      ].join('\n')
+        const msg = [
+          `*${lead.name}* (${lead.ticker})`,
+          `Chain: ${lead.chain} · Score: ${lead.score}/10`,
+          `Mcap: ${lead.mcap}`,
+          socialLinks.length > 0 ? socialLinks.join(' · ') : '',
+          `Contract: \`${lead.tokenAddress || 'N/A'}\``,
+        ].filter(Boolean).join('\n')
+
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: msg,
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '🔗 Start Outreach', callback_data: `handoff_${lead.id}` },
+              ]],
+            },
+          }),
+        })
+      }
 
       await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: chatId,
-          text: msg,
+          text: `✅ Found ${leads.length} leads. ${leads.length > 5 ? `Showing top 5.` : ''}`,
           parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [[
-              { text: '🔗 Start Outreach', callback_data: `handoff_${lead.id}` },
-            ]],
-          },
         }),
       })
+      return
     }
 
+    // No regular leads — check noSocialLeads (projects with no X/Telegram/website)
+    if (noSocialLeads.length > 0) {
+      const topNoSocial = noSocialLeads.slice(0, 5)
+      for (const lead of topNoSocial) {
+        scanLeadCache.set(lead.id, { ...lead, noSocialData: true })
+      }
+
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: `⚠️ *${noSocialLeads.length} projects found with no social links.*\n\nThey can't be reached via X/Telegram/website. If you know founders or KOLs involved, provide their contacts when starting outreach.`,
+          parse_mode: 'Markdown',
+        }),
+      })
+
+      for (const lead of topNoSocial) {
+        const msg = [
+          `*${lead.name}* (${lead.ticker})`,
+          `Chain: ${lead.chain} · Mcap: ${lead.mcap}`,
+          `_No social links available_`,
+          `Contract: \`${lead.tokenAddress || 'N/A'}\``,
+        ].join('\n')
+
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: msg,
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '🔗 Outreach (manual contacts)', callback_data: `handoff_${lead.id}` },
+              ]],
+            },
+          }),
+        })
+      }
+      return
+    }
+
+    // Absolutely nothing found
     await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: `✅ Found ${leads.length} leads. ${leads.length > 5 ? `Showing top 5.` : ''}`,
-        parse_mode: 'Markdown',
-      }),
+      body: JSON.stringify({ chat_id: chatId, text: 'No qualifying leads found with current criteria.', parse_mode: 'Markdown' }),
     })
   } catch (err: any) {
     await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {

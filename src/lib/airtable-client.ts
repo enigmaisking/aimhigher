@@ -5,6 +5,23 @@ const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID
 const AIRTABLE_LEADS_TABLE_ID = process.env.AIRTABLE_LEADS_TABLE_ID
 const AIRTABLE_USERS_TABLE_ID = process.env.AIRTABLE_USERS_TABLE_ID
 
+// Map internal chain values to Airtable Single select labels
+const CHAIN_TO_AIRTABLE: Record<string, string> = {
+  eth: 'Ethereum',
+  ethereum: 'Ethereum',
+  solana: 'Solana',
+  bsc: 'BSC',
+  bnb: 'BSC',
+  base: 'Base',
+  avax: 'AVAX',
+  avalanche: 'AVAX',
+  arbitrum: 'Arbitrum',
+  'polygon-pos': 'Polygon',
+  polygon: 'Polygon',
+  optimism: 'Optimism',
+  fantom: 'Fantom',
+}
+
 const BASE_URL = 'https://api.airtable.com/v0'
 
 async function fetchAirtable(method: string, path: string, data?: any) {
@@ -121,9 +138,9 @@ export const airtableClient = {
       if (SKIP_FIELDS.has(airtableField)) return
       if (value === undefined || value === null || value === '') return
       
-      // Normalize chain to lowercase (Airtable select field)
+      // Map chain to Airtable Single select label
       if (airtableField === 'chain') {
-        value = String(value).toLowerCase().trim()
+        value = CHAIN_TO_AIRTABLE[String(value).toLowerCase().trim()] || String(value)
       }
       
       // Clean token_ticker: strip $ prefix and  / suffix
@@ -165,12 +182,17 @@ export const airtableClient = {
     }
   },
 
-  async findLeadByContract(contractAddress: string): Promise<{ id: string; fields: Record<string, any> } | null> {
+  async findLeadByContract(contractAddress: string, chain?: string): Promise<{ id: string; fields: Record<string, any> } | null> {
     if (!AIRTABLE_LEADS_TABLE_ID || !contractAddress) return null
     try {
+      let formula = `{contract_address}="${contractAddress}"`
+      if (chain) {
+        const mapped = CHAIN_TO_AIRTABLE[chain.toLowerCase().trim()] || chain
+        formula = `AND(${formula},{chain}="${mapped}")`
+      }
       const response = await fetchAirtable(
         'GET',
-        `/${AIRTABLE_LEADS_TABLE_ID}?filterByFormula={contract_address}="${contractAddress}"&maxRecords=1`
+        `/${AIRTABLE_LEADS_TABLE_ID}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=1`
       )
       return response.records?.[0] || null
     } catch (err) {
@@ -183,10 +205,10 @@ export const airtableClient = {
     if (!AIRTABLE_LEADS_TABLE_ID) return null
     try {
       const safeName = projectName.replace(/"/g, '\\"')
-      const safeChain = chain.toLowerCase().trim()
+      const airtableChain = CHAIN_TO_AIRTABLE[chain.toLowerCase().trim()] || chain
       const response = await fetchAirtable(
         'GET',
-        `/${AIRTABLE_LEADS_TABLE_ID}?filterByFormula=AND({project_name}="${safeName}",{chain}="${safeChain}")&maxRecords=1`
+        `/${AIRTABLE_LEADS_TABLE_ID}?filterByFormula=AND({project_name}="${safeName}",{chain}="${airtableChain}")&maxRecords=1`
       )
       return response.records?.[0] || null
     } catch (err) {
@@ -202,7 +224,7 @@ export const airtableClient = {
     Object.entries(updates).forEach(([key, value]) => {
       if (SKIP_FIELDS.has(key)) return
       if (value !== undefined && value !== null && value !== '') {
-        if (key === 'chain') value = String(value).toLowerCase().trim()
+        if (key === 'chain') value = CHAIN_TO_AIRTABLE[String(value).toLowerCase().trim()] || String(value)
         fields[key] = value
       }
     })

@@ -71,7 +71,7 @@ export async function enrichWithSocialLinks(
     try {
       let existing = null
       if (contractAddress) {
-        existing = await airtableClient.findLeadByContract(contractAddress)
+        existing = await airtableClient.findLeadByContract(contractAddress, chain)
       }
       if (!existing) {
         existing = await airtableClient.findLeadByNameChain(projectName, chain)

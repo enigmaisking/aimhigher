@@ -5,7 +5,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ ok: false, error: 'Method not allowed' })
   }
 
-  const { leadId, projectName, contractAddress, chain } = req.body
+  const { leadId, projectName, ticker, contractAddress, chain } = req.body
 
   if (!leadId) {
     return res.status(400).json({ ok: false, error: 'leadId is required' })
@@ -20,6 +20,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       projectName || leadId,
       contractAddress || '',
       chain || '',
+      ticker || '',
     )
 
     const telegramChatId = process.env.TELEGRAM_CHAT_ID || ''

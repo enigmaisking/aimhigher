@@ -325,6 +325,7 @@ export default function HomePage() {
           body: JSON.stringify({
             leadId: selectedLead.id,
             projectName: selectedLead.name,
+            ticker: selectedLead.ticker,
             contractAddress: selectedLead.tokenAddress || '',
             chain: selectedLead.chain,
             twitterHandle: selectedLead.twitterHandle || null,

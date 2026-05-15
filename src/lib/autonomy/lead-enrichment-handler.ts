@@ -60,15 +60,44 @@ export async function enrichWithSocialLinks(
   leadId: string,
   projectName: string,
   contractAddress: string,
-  chain: string
+  chain: string,
+  ticker?: string
 ): Promise<EnrichmentContext> {
   console.log(`[Enrichment] Step 1: Fetching social links for ${projectName}`)
 
   try {
+    // Resolve real Airtable record ID
+    let airtableRecordId = leadId
+    try {
+      let existing = null
+      if (contractAddress) {
+        existing = await airtableClient.findLeadByContract(contractAddress)
+      }
+      if (!existing) {
+        existing = await airtableClient.findLeadByNameChain(projectName, chain)
+      }
+      if (existing) {
+        airtableRecordId = existing.id
+        console.log(`[Enrichment] Found existing Airtable record: ${airtableRecordId}`)
+      } else {
+        const newRecord = await airtableClient.createLead({
+          project_name: projectName,
+          token_ticker: ticker || projectName.slice(0, 10),
+          contract_address: contractAddress,
+          chain,
+          status: 'new',
+        })
+        airtableRecordId = newRecord?.id || leadId
+        console.log(`[Enrichment] Created new Airtable record: ${airtableRecordId}`)
+      }
+    } catch (err) {
+      console.warn(`[Enrichment] Could not resolve Airtable record ID, using original leadId: ${err}`)
+    }
+
     const socialLinks = await fetchGeckoTerminalSocialLinks(contractAddress, chain)
 
     const context: EnrichmentContext = {
-      leadId,
+      leadId: airtableRecordId,
       projectName,
       contractAddress,
       chain,
@@ -82,7 +111,7 @@ export async function enrichWithSocialLinks(
 
     // Save to Airtable for persistence
     try {
-      await airtableClient.updateLead(leadId, {
+      await airtableClient.updateLead(airtableRecordId, {
         social_links_json: JSON.stringify(socialLinks),
         enrichment_step: 'awaiting_group_join',
       })

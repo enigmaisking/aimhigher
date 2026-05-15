@@ -155,6 +155,35 @@ export const airtableClient = {
     }
   },
 
+  async findLeadByContract(contractAddress: string): Promise<{ id: string; fields: Record<string, any> } | null> {
+    if (!AIRTABLE_LEADS_TABLE_ID || !contractAddress) return null
+    try {
+      const response = await fetchAirtable(
+        'GET',
+        `/${AIRTABLE_LEADS_TABLE_ID}?filterByFormula={contract_address}="${contractAddress}"&maxRecords=1`
+      )
+      return response.records?.[0] || null
+    } catch (err) {
+      console.warn('[Airtable] findLeadByContract error:', err)
+      return null
+    }
+  },
+
+  async findLeadByNameChain(projectName: string, chain: string): Promise<{ id: string; fields: Record<string, any> } | null> {
+    if (!AIRTABLE_LEADS_TABLE_ID) return null
+    try {
+      const safeName = projectName.replace(/"/g, '\\"')
+      const response = await fetchAirtable(
+        'GET',
+        `/${AIRTABLE_LEADS_TABLE_ID}?filterByFormula=AND({project_name}="${safeName}",{chain}="${chain}")&maxRecords=1`
+      )
+      return response.records?.[0] || null
+    } catch (err) {
+      console.warn('[Airtable] findLeadByNameChain error:', err)
+      return null
+    }
+  },
+
   async updateLead(id: string, updates: any): Promise<any> {
     if (!AIRTABLE_LEADS_TABLE_ID) throw new Error('Leads table ID not configured')
     

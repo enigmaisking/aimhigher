@@ -32,44 +32,49 @@ export async function fetchGeckoTerminalSocialLinks(
   chain: string
 ): Promise<SocialLinks> {
   try {
-    // Map chain to GeckoTerminal network ID
     const networkId = mapChainToNetworkId(chain)
     if (!networkId) {
       console.warn(`[GeckoTerminal] Unknown chain: ${chain}`)
       return {}
     }
 
-    // Normalize contract address
     const normalizedAddress = contractAddress.toLowerCase()
 
-    // Fetch token data from GeckoTerminal
-    const url = `https://api.geckoterminal.com/api/v3/networks/${networkId}/tokens/${normalizedAddress}`
-    console.log(`[GeckoTerminal] Fetching social links from: ${url}`)
+    // Try tokens endpoint first, then pools as fallback
+    const urls = [
+      `https://api.geckoterminal.com/api/v3/networks/${networkId}/tokens/${normalizedAddress}`,
+      `https://api.geckoterminal.com/api/v3/networks/${networkId}/pools/${normalizedAddress}`,
+    ]
 
-    const response = await fetch(url, {
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'XAim-Autonomy/1.0',
-      },
-    })
+    for (const url of urls) {
+      console.log(`[GeckoTerminal] Fetching from: ${url}`)
+      const response = await fetch(url, {
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'XAim-Autonomy/1.0',
+        },
+      })
 
-    if (!response.ok) {
-      console.warn(`[GeckoTerminal] API error: ${response.status} ${response.statusText}`)
-      return {}
+      if (!response.ok) {
+        console.warn(`[GeckoTerminal] ${url} returned ${response.status}`)
+        continue
+      }
+
+      const data = await response.json()
+      const item = data.data
+      if (!item || !item.attributes) {
+        console.warn(`[GeckoTerminal] No data at ${url}`)
+        continue
+      }
+
+      const attrs = item.attributes
+      const socialLinks = extractSocialLinks(attrs)
+      console.log(`[GeckoTerminal] Found social links:`, socialLinks)
+      return socialLinks
     }
 
-    const data = await response.json()
-    
-    if (!data.data || !data.data.attributes) {
-      console.warn(`[GeckoTerminal] No data found for ${contractAddress} on ${chain}`)
-      return {}
-    }
-
-    const attrs = data.data.attributes
-    const socialLinks = extractSocialLinks(attrs)
-
-    console.log(`[GeckoTerminal] Found social links:`, socialLinks)
-    return socialLinks
+    console.warn(`[GeckoTerminal] No data found for ${contractAddress} on ${chain} (tried tokens + pools)`)
+    return {}
   } catch (error: any) {
     console.error(`[GeckoTerminal] Error fetching social links:`, error.message)
     return {}

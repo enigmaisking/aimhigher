@@ -133,7 +133,10 @@ export async function formatGroupJoinRequest(
   _telegramChatId: string
 ): Promise<string> {
   const links = context.socialLinks || {}
-  const socialText = formatSocialLinksForTelegram(links)
+  const hasLinks = Object.keys(links).length > 0
+  const socialText = hasLinks
+    ? formatSocialLinksForTelegram(links)
+    : '_No social links auto-discovered. Please search for the project manually on X or Telegram to find their community channels._'
 
   const message = [
     `*🔗 Lead Enrichment: ${context.projectName}*`,
@@ -142,7 +145,9 @@ export async function formatGroupJoinRequest(
     ``,
     socialText,
     ``,
-    `After joining, click "✅ Confirm Joined" to proceed with audience filtering.`,
+    hasLinks
+      ? `After joining, click "✅ Confirm Joined" to proceed with audience filtering.`
+      : `Once you've found and joined their Telegram/Discord, click "✅ Confirm Joined" to proceed.`,
     ``,
     `*Why?* We'll scan the Telegram group to identify high-value community members (founders, KOLs, devs) for outreach.`,
   ].join('\n')

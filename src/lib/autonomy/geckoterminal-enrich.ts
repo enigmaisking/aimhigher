@@ -24,25 +24,36 @@ export interface EnrichedLead {
 }
 
 /**
- * Fetch social links for a project from GeckoTerminal API
- * GeckoTerminal v3 endpoint: GET /api/v3/networks/{networkId}/tokens/{tokenAddress}
+ * Fetch social links for a project — tries GeckoTerminal first, then DexScreener as fallback
  */
 export async function fetchGeckoTerminalSocialLinks(
   contractAddress: string,
   chain: string
 ): Promise<SocialLinks> {
+  let links: SocialLinks = {}
+
+  // Try GeckoTerminal
+  links = await fetchGeckoTerminalV2(contractAddress, chain)
+
+  // Fallback: DexScreener (richer social data)
+  if (Object.keys(links).length === 0) {
+    links = await fetchDexScreenerSocialLinks(contractAddress, chain)
+  }
+
+  return links
+}
+
+async function fetchGeckoTerminalV2(
+  contractAddress: string,
+  chain: string
+): Promise<SocialLinks> {
   try {
     const networkId = mapChainToNetworkId(chain)
-    if (!networkId) {
-      console.warn(`[GeckoTerminal] Unknown chain: ${chain}`)
-      return {}
-    }
+    if (!networkId) return {}
 
     const normalizedAddress = contractAddress.toLowerCase()
-
-    // Use v2 API for social links
     const url = `https://api.geckoterminal.com/api/v2/networks/${networkId}/tokens/${normalizedAddress}`
-    console.log(`[GeckoTerminal] Fetching social links from: ${url}`)
+    console.log(`[GeckoTerminal] Fetching from: ${url}`)
 
     const response = await fetch(url, {
       headers: {
@@ -51,25 +62,66 @@ export async function fetchGeckoTerminalSocialLinks(
       },
     })
 
-    if (!response.ok) {
-      console.warn(`[GeckoTerminal] API error: ${response.status} ${response.statusText}`)
-      return {}
-    }
-
+    if (!response.ok) return {}
     const data = await response.json()
-
-    if (!data.data || !data.data.attributes) {
-      console.warn(`[GeckoTerminal] No data found for ${contractAddress} on ${chain}`)
-      return {}
-    }
+    if (!data.data || !data.data.attributes) return {}
 
     const attrs = data.data.attributes
     const socialLinks = extractSocialLinks(attrs)
-
-    console.log(`[GeckoTerminal] Found social links:`, socialLinks)
+    if (Object.keys(socialLinks).length > 0) {
+      console.log(`[GeckoTerminal] Found social links:`, socialLinks)
+    }
     return socialLinks
   } catch (error: any) {
-    console.error(`[GeckoTerminal] Error fetching social links:`, error.message)
+    console.warn(`[GeckoTerminal] Error:`, error.message)
+    return {}
+  }
+}
+
+/**
+ * Fallback: DexScreener API — returns social links for most tokens
+ * GET https://api.dexscreener.com/latest/dex/tokens/{tokenAddress}
+ */
+async function fetchDexScreenerSocialLinks(
+  contractAddress: string,
+  _chain: string
+): Promise<SocialLinks> {
+  try {
+    const url = `https://api.dexscreener.com/latest/dex/tokens/${contractAddress.toLowerCase()}`
+    console.log(`[DexScreener] Fetching social links from: ${url}`)
+
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'XAim-Autonomy/1.0' },
+    })
+    if (!response.ok) return {}
+
+    const data = await response.json()
+    const pairs = data.pairs || []
+    if (pairs.length === 0) return {}
+
+    // Take the first pair with social info
+    const info = pairs[0].info || {}
+    const links: SocialLinks = {}
+
+    if (info.twitter) links.twitter = info.twitter.startsWith('http') ? info.twitter : `https://twitter.com/${info.twitter}`
+    if (info.telegram) links.telegram = info.telegram.startsWith('http') ? info.telegram : `https://t.me/${info.telegram}`
+    if (info.discord) links.discord = info.discord.startsWith('http') ? info.discord : `https://discord.gg/${info.discord}`
+    if (info.website) links.website = Array.isArray(info.website) ? info.website[0] : info.website
+    if (info.github) links.github = info.github.startsWith('http') ? info.github : `https://github.com/${info.github}`
+
+    // Also check socialUrls object
+    if (data.socialUrls) {
+      if (data.socialUrls.twitter && !links.twitter) links.twitter = data.socialUrls.twitter
+      if (data.socialUrls.telegram && !links.telegram) links.telegram = data.socialUrls.telegram
+      if (data.socialUrls.discord && !links.discord) links.discord = data.socialUrls.discord
+    }
+
+    if (Object.keys(links).length > 0) {
+      console.log(`[DexScreener] Found social links:`, links)
+    }
+    return links
+  } catch (error: any) {
+    console.warn(`[DexScreener] Error:`, error.message)
     return {}
   }
 }

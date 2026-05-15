@@ -74,7 +74,8 @@ const SCOUT_CONFIG = {
   MAX_MCAP: 5000000,
   MIN_LIQUIDITY: 2500,
   LEAD_SCORE_THRESHOLD: 7,
-  RATE_LIMIT_DELAY: 400,
+  RATE_LIMIT_DELAY: 2200,
+  MAX_RETRIES: 3,
   // When GeckoTerminal doesn't return market_cap_usd, estimate from reserve
   MCAP_RESERVE_MULTIPLIER: 25,
 }
@@ -227,11 +228,24 @@ async function fetchGeckoPools(chain: string, endpoint: string): Promise<Project
   const geckoChain = normalizeChain(chain)
   const url = `${GECKO_BASE}/networks/${geckoChain}/${endpoint}?limit=50&include=base_token`
 
-  const response = await fetch(url, {
-    headers: { 'User-Agent': 'AimHigherScout/1.0' },
-  })
-  if (!response.ok) {
+  let response: Response | null = null
+  for (let attempt = 1; attempt <= SCOUT_CONFIG.MAX_RETRIES; attempt++) {
+    response = await fetch(url, {
+      headers: { 'User-Agent': 'AimHigherScout/1.0' },
+    })
+    if (response.ok) break
+    if (response.status === 429 && attempt < SCOUT_CONFIG.MAX_RETRIES) {
+      const backoff = SCOUT_CONFIG.RATE_LIMIT_DELAY * attempt
+      console.warn(`[Scout] ${geckoChain}/${endpoint}: 429 (attempt ${attempt}), retrying in ${backoff}ms`)
+      await sleep(backoff)
+      continue
+    }
     console.warn(`[Scout] ${geckoChain}/${endpoint}: ${response.status}`)
+    return projects
+  }
+
+  if (!response || !response.ok) {
+    console.warn(`[Scout] ${geckoChain}/${endpoint}: all retries exhausted`)
     return projects
   }
 

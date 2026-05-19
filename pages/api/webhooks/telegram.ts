@@ -286,6 +286,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const leadId = data.replace('handoff_', '')
         // Always use the user who clicked the button (cb.from?.id), not the message chat
         const chatId = cb.from?.id
+        console.log(`[Telegram Webhook] Handoff: leadId=${leadId}, user=${cb.from?.id}, group=${cb.message?.chat?.id}, type=${cb.message?.chat?.type}`)
         await handleHandoff(leadId, chatId, botToken, req.headers.host)
         if (botToken) {
           await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {

@@ -291,8 +291,10 @@ export async function sendDraftForApproval(
 
   // Send to user if userChatId provided, otherwise fall back to team chat
   if (userChatId) {
+    console.log(`[sendDraftForApproval] Sending draft to user ${userChatId}`)
     return sendMessageWithButtons(userChatId, message, buttons)
   }
+  console.log(`[sendDraftForApproval] No userChatId provided, sending to team chat`)
   return sendTeamMessageWithButtons(message, buttons)
 }
 

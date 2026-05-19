@@ -27,6 +27,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ ok: false, error: 'leadId is required' })
   }
 
+  console.log(`[Handoff] Received userChatId: ${userChatId}, type: ${typeof userChatId}`)
+
   try {
     const { enrichWithSocialLinks, formatGroupJoinRequest, updateEnrichmentStep } = await import('../../src/lib/autonomy/lead-enrichment-handler')
     const { sendGroupJoinRequest, sendDraftForApproval } = await import('../../src/lib/autonomy/telegram-client')

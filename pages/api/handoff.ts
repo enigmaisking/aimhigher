@@ -121,7 +121,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const fullDraft = await generateFullDraft(leadId, draftInput)
     const { sendDraftForApproval } = await import('../../src/lib/autonomy/telegram-client')
-    await sendDraftForApproval(leadId, context.projectName, fullDraft.outreach, context.socialLinks, hasTelegram, userChatId)
+    const draftResult = await sendDraftForApproval(leadId, context.projectName, fullDraft.outreach, context.socialLinks, hasTelegram, userChatId)
+
+    console.log(`[Handoff] Draft send result: ${JSON.stringify(draftResult)}`)
+
+    if (!draftResult.ok) {
+      console.error(`[Handoff] Failed to send draft: ${draftResult.error}`)
+      return res.status(500).json({
+        ok: false,
+        error: `Draft generated but failed to send: ${draftResult.error}. Make sure the bot can post messages here.`,
+      })
+    }
 
     console.log(`[Handoff] Draft sent for approval: ${context.projectName}`)
 

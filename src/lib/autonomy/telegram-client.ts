@@ -254,7 +254,8 @@ export async function sendDraftForApproval(
   const approveText = hasTg ? '✅ Approve & Send via Telegram' : '✅ Approve (manual send)'
   const approveAction = hasTg ? 'enrich_draft_approve' : 'enrich_draft_approve_manual'
 
-  const message = [
+  // Build message and trim draft to fit within Telegram's 4096 char limit
+  const wrapperPrefix = [
     `*✏️ Outreach Draft for ${projectName}*`,
     linksSection,
     hasTg
@@ -262,13 +263,22 @@ export async function sendDraftForApproval(
       : `_X only — draft prepared for manual outreach._`,
     `*📝 Message:*`,
     `\`\`\``,
-    outreachDraft,
+  ].join('\n')
+
+  const wrapperSuffix = [
     `\`\`\``,
     ``,
     hasTg
       ? `Review and approve to auto-send via Telegram.`
       : `Review the draft, then continue outreach manually on X.`,
   ].join('\n')
+
+  const maxDraftLen = 4000 - wrapperPrefix.length - wrapperSuffix.length
+  const trimmedDraft = outreachDraft.length > maxDraftLen
+    ? outreachDraft.slice(0, maxDraftLen - 50) + `\n\n...[truncated - ${outreachDraft.length - maxDraftLen + 50} chars remaining]`
+    : outreachDraft
+
+  const message = [wrapperPrefix, trimmedDraft, wrapperSuffix].join('\n')
 
   const buttons: InlineButton[][] = [
     [

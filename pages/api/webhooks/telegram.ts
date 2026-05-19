@@ -14,6 +14,7 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 
 interface ScanSession {
   chatId: number | string
+  userId: number | string  // The user who initiated the scan
   leads: any[]
   page: number
   pageSize: number
@@ -179,7 +180,7 @@ async function sendLeadsPage(session: ScanSession, botToken: string) {
   }
 }
 
-async function runScan(chatId: number | string, preset: string, botToken: string, host?: string) {
+async function runScan(chatId: number | string, userId: number | string, preset: string, botToken: string, host?: string) {
   const chains = SCAN_CHAINS[preset] || SCAN_CHAINS.all
   const appUrl = getAppUrl(host)
 
@@ -232,6 +233,7 @@ async function runScan(chatId: number | string, preset: string, botToken: string
     const totalPages = Math.ceil(leads.length / pageSize)
     const session: ScanSession = {
       chatId,
+      userId,
       leads,
       page: 0,
       pageSize,
@@ -271,7 +273,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Handle scan presets
       if (data.startsWith('scan_') && botToken) {
         const preset = data.replace('scan_', '')
-        await runScan(cb.message?.chat?.id || cb.from?.id, preset, botToken, req.headers.host)
+        const chatId = cb.message?.chat?.id || cb.from?.id
+        const userId = cb.from?.id
+        console.log(`[Telegram Webhook] Scan: preset=${preset}, chatId=${chatId}, userId=${userId}`)
+        await runScan(chatId, userId, preset, botToken, req.headers.host)
         if (botToken) {
           await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -284,10 +289,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Handle handoff from /scan results
       if (data.startsWith('handoff_') && botToken) {
         const leadId = data.replace('handoff_', '')
-        // Always use the user who clicked the button (cb.from?.id), not the message chat
-        const chatId = cb.from?.id
-        console.log(`[Telegram Webhook] Handoff: leadId=${leadId}, user=${cb.from?.id}, group=${cb.message?.chat?.id}, type=${cb.message?.chat?.type}`)
-        await handleHandoff(leadId, chatId, botToken, req.headers.host)
+        const messageChat = cb.message?.chat?.id
+        const clicker = cb.from?.id
+        
+        // Try to get userId from scan session first
+        let userId = clicker
+        if (messageChat) {
+          const session = scanLeadCache.get(`_scan_${messageChat}`)
+          if (session && session.userId) {
+            userId = session.userId
+            console.log(`[Telegram Webhook] Handoff: Using userId from session: ${userId}`)
+          }
+        }
+        
+        console.log(`[Telegram Webhook] Handoff: leadId=${leadId}, clicker=${clicker}, messageChat=${messageChat}, userId=${userId}`)
+        await handleHandoff(leadId, userId, botToken, req.headers.host)
         if (botToken) {
           await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },

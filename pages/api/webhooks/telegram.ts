@@ -275,7 +275,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const preset = data.replace('scan_', '')
         const chatId = cb.message?.chat?.id || cb.from?.id
         const userId = cb.from?.id
-        console.log(`[Telegram Webhook] Scan: preset=${preset}, chatId=${chatId}, userId=${userId}`)
         await runScan(chatId, userId, preset, botToken, req.headers.host)
         if (botToken) {
           await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
@@ -298,11 +297,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const session = scanLeadCache.get(`_scan_${messageChat}`)
           if (session && session.userId) {
             userId = session.userId
-            console.log(`[Telegram Webhook] Handoff: Using userId from session: ${userId}`)
           }
         }
         
-        console.log(`[Telegram Webhook] Handoff: leadId=${leadId}, clicker=${clicker}, messageChat=${messageChat}, userId=${userId}`)
         await handleHandoff(leadId, userId, botToken, req.headers.host)
         if (botToken) {
           await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {

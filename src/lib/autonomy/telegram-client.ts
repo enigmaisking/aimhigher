@@ -296,7 +296,33 @@ export async function sendDraftForApproval(
   }
 
   console.log(`[sendDraftForApproval] Sending draft for ${projectName} to user ${userChatId}`)
-  return sendMessageWithButtons(String(userChatId), message, buttons)
+  const targetChatId = String(userChatId)
+
+  // Try with Markdown first, fall back to plain text if Telegram rejects markdown
+  const result = await sendMessageWithButtons(targetChatId, message, buttons)
+  if (result.ok) return result
+
+  console.warn(`[sendDraftForApproval] Markdown send failed, retrying as plain text: ${result.error}`)
+  // Retry without markdown parsing
+  if (!BOT_TOKEN) return { ok: false, error: 'TELEGRAM_BOT_TOKEN not configured' }
+  try {
+    const response = await fetch(`${API_BASE}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: targetChatId,
+        text: message,
+        reply_markup: { inline_keyboard: buttons },
+      }),
+    })
+    const data = await response.json()
+    if (!data.ok) {
+      return { ok: false, error: `Telegram API error (plain text fallback): ${data.description}` }
+    }
+    return { ok: true, messageId: data.result?.message_id }
+  } catch (error: any) {
+    return { ok: false, error: error.message }
+  }
 }
 
 /**

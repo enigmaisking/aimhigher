@@ -290,6 +290,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const leadId = data.replace('handoff_', '')
         const sourceChatId = cb.message?.chat?.id || cb.from?.id
         
+        console.log(`[Webhook] Handoff: leadId=${leadId}, sourceChatId=${sourceChatId}, from=${cb.from?.id}, chatType=${cb.message?.chat?.type}`)
+        
         await handleHandoff(leadId, sourceChatId, sourceChatId, botToken, req.headers.host)
         if (botToken) {
           await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {

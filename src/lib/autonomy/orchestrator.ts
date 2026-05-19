@@ -499,17 +499,22 @@ async function handleEnrichmentAction(
         `• @${p.username || `user_${p.userId}`} (${p.role}, ${p.score}/100)`
       ).join('\n')
 
-      await sendDraftForApproval(leadId, draftInput.projectName, fullDraft.outreach, context?.socialLinks, hasTg)
+      await sendDraftForApproval(leadId, draftInput.projectName, fullDraft.outreach, context?.socialLinks, hasTg, context?.userId)
 
-      // Notify HITL of target audience found
-      const { sendTeamNotification } = await import('./telegram-client')
-      await sendTeamNotification(
-        `🎯 *Target Audience Found for ${draftInput.projectName}*` +
-        `\n\n*Group:* ${groupData.groupTitle} (${groupData.totalCount} members)` +
-        `\n*High-value targets:* ${highValue.length}` +
-        (audienceSummary ? `\n\n*Top targets:*\n${audienceSummary}` : '') +
-        `\n\nAdaptive outreach drafts generated per role. Review and approve above.`
-      )
+      // Notify user of target audience found
+      const { sendMessage } = await import('./telegram-client')
+      const userId = context?.userId
+      if (userId) {
+        await sendMessage(
+          userId,
+          `🎯 *Target Audience Found for ${draftInput.projectName}*` +
+          `\n\n*Group:* ${groupData.groupTitle} (${groupData.totalCount} members)` +
+          `\n*High-value targets:* ${highValue.length}` +
+          (audienceSummary ? `\n\n*Top targets:*\n${audienceSummary}` : '') +
+          `\n\nAdaptive outreach drafts generated per role. Review and approve above.`,
+          { parse_mode: 'Markdown' }
+        )
+      }
 
       return { ok: true, responseText: `Group scanned: ${highValue.length} high-value targets found. Draft ready for review.` }
     } catch (err: any) {
@@ -604,7 +609,7 @@ async function handleEnrichmentAction(
         onboardingDraft: newDraft.onboarding,
       })
       const hasTg = !!(context?.socialLinks?.telegram)
-      await sendDraftForApproval(leadId, context.projectName, newDraft.outreach, context?.socialLinks, hasTg)
+      await sendDraftForApproval(leadId, context.projectName, newDraft.outreach, context?.socialLinks, hasTg, context?.userId)
 
       return { ok: true, responseText: 'Draft regenerated! Review the new version.' }
     } catch (err: any) {

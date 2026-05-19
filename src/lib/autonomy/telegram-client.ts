@@ -289,13 +289,14 @@ export async function sendDraftForApproval(
     ],
   ]
 
-  // Send to user if userChatId provided, otherwise fall back to team chat
-  if (userChatId) {
-    console.log(`[sendDraftForApproval] Sending draft to user ${userChatId}`)
-    return sendMessageWithButtons(userChatId, message, buttons)
+  // IMPORTANT: Must have userChatId to route to the correct user
+  if (!userChatId) {
+    console.error(`[sendDraftForApproval] No userChatId provided for lead ${leadId}!`)
+    return { ok: false, error: 'Cannot send draft: no userChatId provided' }
   }
-  console.log(`[sendDraftForApproval] No userChatId provided, sending to team chat`)
-  return sendTeamMessageWithButtons(message, buttons)
+
+  console.log(`[sendDraftForApproval] Sending draft for ${projectName} to user ${userChatId}`)
+  return sendMessageWithButtons(String(userChatId), message, buttons)
 }
 
 /**

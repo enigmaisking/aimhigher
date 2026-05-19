@@ -30,8 +30,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   console.log(`[Handoff] Received userChatId: ${userChatId}, type: ${typeof userChatId}`)
 
   try {
-    const { enrichWithSocialLinks, formatGroupJoinRequest, updateEnrichmentStep } = await import('../../src/lib/autonomy/lead-enrichment-handler')
-    const { sendGroupJoinRequest, sendDraftForApproval } = await import('../../src/lib/autonomy/telegram-client')
+    const { enrichWithSocialLinks, formatGroupJoinRequest, updateEnrichmentStep, setCachedContext, getCachedContext } = await import('../../src/lib/autonomy/lead-enrichment-handler')
+    const { sendMessageWithButtons } = await import('../../src/lib/autonomy/telegram-client')
     const { generateFullDraft } = await import('../../src/lib/autonomy/draft-generator')
 
     const context = await enrichWithSocialLinks(
@@ -42,6 +42,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ticker || '',
       socialLinks,
     )
+
+    // Store userId in enrichment context so callbacks route to the right user
+    if (userChatId) {
+      const existing = getCachedContext(leadId)
+      if (existing) {
+        setCachedContext({ ...existing, userId: userChatId })
+      }
+    }
 
     // Ensure social links from scan data are used even if enrichWithSocialLinks
     // had to fall back to API fetch (which may return empty results)
@@ -54,7 +62,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     context.socialLinks = mergedLinks
 
-    const telegramChatId = process.env.TELEGRAM_CHAT_ID || ''
     const hasTelegram = !!(context.socialLinks?.telegram)
 
     // Derive target audience info from provided individuals or enrichment context
@@ -71,20 +78,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return roleToTag[t.role] || 'COMMUNITY_LEAD'
     })
 
-    if (hasTelegram && telegramChatId) {
-      // Normal path: has Telegram → ask HITL to join group
-      const groupRequestMessage = await formatGroupJoinRequest(context, telegramChatId)
-      const result = await sendGroupJoinRequest(leadId, context.projectName, groupRequestMessage)
+    if (hasTelegram && userChatId) {
+      // Normal path: has Telegram → ask user to join group
+      const groupRequestMessage = await formatGroupJoinRequest(context, String(userChatId))
+      const buttons = [
+        [
+          { text: '✅ Confirmed Joined', callback_data: `enrich_group_confirmed_${leadId}` },
+          { text: '⏭️ Skip', callback_data: `enrich_skip_${leadId}` },
+        ],
+      ]
+      const result = await sendMessageWithButtons(userChatId, groupRequestMessage, buttons)
       if (!result.ok) {
         console.error(`[Handoff] Telegram send failed: ${result.error}`)
       } else {
-        console.log(`[Handoff] Group join request sent (messageId: ${result.messageId})`)
+        console.log(`[Handoff] Group join request sent to user ${userChatId} (messageId: ${result.messageId})`)
       }
 
       return res.status(200).json({
         ok: true,
         data: {
-          message: `Lead "${context.projectName}" handed off. HITL notified to join Telegram group.`,
+          message: `Lead "${context.projectName}" handed off. Check your DM to join the Telegram group.`,
           projectName: context.projectName,
           step: context.currentStep,
         },
@@ -92,8 +105,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // No Telegram link — generate draft directly
-    // If known founders/KOLs were provided as target individuals, 
-    // include them in the draft so outreach targets their specific role
     const hasOtherSocials = !!(context.socialLinks?.twitter || context.socialLinks?.website || context.socialLinks?.discord)
     console.log(`[Handoff] No Telegram link — generating draft${targetIndividuals?.length ? ` for ${targetIndividuals.length} known individuals` : ''}`)
     await updateEnrichmentStep(leadId, 'generating_draft')
@@ -111,6 +122,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const fullDraft = await generateFullDraft(leadId, draftInput)
+    const { sendDraftForApproval } = await import('../../src/lib/autonomy/telegram-client')
     await sendDraftForApproval(leadId, context.projectName, fullDraft.outreach, context.socialLinks, hasTelegram, userChatId)
 
     console.log(`[Handoff] Draft sent for approval: ${context.projectName}`)

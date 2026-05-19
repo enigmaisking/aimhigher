@@ -37,6 +37,7 @@ export interface EnrichmentContext {
   updatedAt: number
   hitlApproved?: boolean
   reminders?: number            // Count of reminders sent
+  userId?: string | number      // Telegram user who initiated this enrichment
 }
 
 // In-memory cache for enrichment contexts
@@ -57,44 +58,63 @@ export function setCachedContext(context: EnrichmentContext): void {
 // ─── STEP 1: FETCH SOCIAL LINKS ─────────────────────────────────────────────
 
 export async function enrichWithSocialLinks(
-  leadId: string,
+  _leadId: string,
   projectName: string,
   contractAddress: string,
   chain: string,
-  ticker?: string
+  ticker?: string,
+  knownSocialLinks?: { twitter?: string | null; telegram?: string | null; website?: string | null; discord?: string | null }
 ): Promise<EnrichmentContext> {
   console.log(`[Enrichment] Step 1: Fetching social links for ${projectName}`)
 
-  try {
-    // Resolve real Airtable record ID
-    let airtableRecordId = leadId
     try {
-      let existing = null
-      if (contractAddress) {
-        existing = await airtableClient.findLeadByContract(contractAddress, chain)
+      // Resolve real Airtable record ID
+      let airtableRecordId: string | null = null
+      try {
+        let existing = null
+        if (contractAddress) {
+          existing = await airtableClient.findLeadByContract(contractAddress, chain)
+        }
+        if (!existing) {
+          existing = await airtableClient.findLeadByNameChain(projectName, chain)
+        }
+        if (existing) {
+          airtableRecordId = existing.id
+          console.log(`[Enrichment] Found existing Airtable record: ${airtableRecordId}`)
+        } else {
+          const newRecord = await airtableClient.createLead({
+            project_name: projectName,
+            token_ticker: ticker || projectName.slice(0, 10),
+            contract_address: contractAddress,
+            chain,
+            status: 'new',
+          })
+          if (newRecord?.id?.startsWith('rec')) {
+            airtableRecordId = newRecord.id
+            console.log(`[Enrichment] Created new Airtable record: ${airtableRecordId}`)
+          }
+        }
+      } catch (err) {
+        console.warn(`[Enrichment] Airtable lookup/create failed: ${err}`)
       }
-      if (!existing) {
-        existing = await airtableClient.findLeadByNameChain(projectName, chain)
-      }
-      if (existing) {
-        airtableRecordId = existing.id
-        console.log(`[Enrichment] Found existing Airtable record: ${airtableRecordId}`)
-      } else {
-        const newRecord = await airtableClient.createLead({
-          project_name: projectName,
-          token_ticker: ticker || projectName.slice(0, 10),
-          contract_address: contractAddress,
-          chain,
-          status: 'new',
-        })
-        airtableRecordId = newRecord?.id || leadId
-        console.log(`[Enrichment] Created new Airtable record: ${airtableRecordId}`)
-      }
-    } catch (err) {
-      console.warn(`[Enrichment] Could not resolve Airtable record ID, using original leadId: ${err}`)
-    }
 
-    const socialLinks = await fetchGeckoTerminalSocialLinks(contractAddress, chain)
+      if (!airtableRecordId || !airtableRecordId.startsWith('rec')) {
+        throw new Error(`Could not resolve or create Airtable record for "${projectName}" (chain: ${chain})`)
+      }
+
+    // Use known social links from scan data if available, otherwise fetch from APIs
+    let socialLinks: SocialLinks = {}
+    if (knownSocialLinks && (knownSocialLinks.twitter || knownSocialLinks.telegram || knownSocialLinks.website || knownSocialLinks.discord)) {
+      socialLinks = {
+        twitter: knownSocialLinks.twitter || undefined,
+        telegram: knownSocialLinks.telegram || undefined,
+        website: knownSocialLinks.website || undefined,
+        discord: knownSocialLinks.discord || undefined,
+      }
+      console.log(`[Enrichment] Using known social links from scan data:`, socialLinks)
+    } else {
+      socialLinks = await fetchGeckoTerminalSocialLinks(contractAddress, chain)
+    }
 
     const context: EnrichmentContext = {
       leadId: airtableRecordId,

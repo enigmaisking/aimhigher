@@ -36,12 +36,12 @@ function getAppUrl(host?: string): string {
   return process.env.NEXT_PUBLIC_APP_URL || (host ? `https://${host}` : 'https://aimhigher-one.vercel.app')
 }
 
-async function handleHandoff(leadId: string, chatId: number | string, botToken: string, host?: string) {
+async function handleHandoff(leadId: string, _userId: number | string, sourceChatId: number | string, botToken: string, host?: string) {
   const lead = scanLeadCache.get(leadId)
   if (!lead) {
     await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: '❌ Lead data not found in cache. Run /scan again.', parse_mode: 'Markdown' }),
+      body: JSON.stringify({ chat_id: sourceChatId, text: '❌ Lead data not found in cache. Run /scan again.', parse_mode: 'Markdown' }),
     })
     return
   }
@@ -56,7 +56,7 @@ async function handleHandoff(leadId: string, chatId: number | string, botToken: 
       ticker: lead.ticker?.replace('$', ''),
       contractAddress: lead.tokenAddress || '',
       chain: lead.chain,
-      userChatId: chatId,
+      userChatId: sourceChatId,
       socialLinks: {
         twitter: lead.twitterHandle || null,
         telegram: lead.telegramHandle || null,
@@ -70,12 +70,12 @@ async function handleHandoff(leadId: string, chatId: number | string, botToken: 
   if (json.ok) {
     await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: `✅ ${json.data.message}`, parse_mode: 'Markdown' }),
+      body: JSON.stringify({ chat_id: sourceChatId, text: `✅ ${json.data.message}`, parse_mode: 'Markdown' }),
     })
   } else {
     await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: `❌ Handoff failed: ${json.error}`, parse_mode: 'Markdown' }),
+      body: JSON.stringify({ chat_id: sourceChatId, text: `❌ Handoff failed: ${json.error}`, parse_mode: 'Markdown' }),
     })
   }
 }
@@ -288,19 +288,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Handle handoff from /scan results
       if (data.startsWith('handoff_') && botToken) {
         const leadId = data.replace('handoff_', '')
-        const messageChat = cb.message?.chat?.id
-        const clicker = cb.from?.id
+        const sourceChatId = cb.message?.chat?.id || cb.from?.id
         
-        // Try to get userId from scan session first
-        let userId = clicker
-        if (messageChat) {
-          const session = scanLeadCache.get(`_scan_${messageChat}`)
-          if (session && session.userId) {
-            userId = session.userId
-          }
-        }
-        
-        await handleHandoff(leadId, userId, botToken, req.headers.host)
+        await handleHandoff(leadId, sourceChatId, sourceChatId, botToken, req.headers.host)
         if (botToken) {
           await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },

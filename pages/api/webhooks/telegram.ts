@@ -284,7 +284,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Handle handoff from /scan results
       if (data.startsWith('handoff_') && botToken) {
         const leadId = data.replace('handoff_', '')
-        const chatId = cb.message?.chat?.id || cb.from?.id
+        // Always use the user who clicked the button (cb.from?.id), not the message chat
+        const chatId = cb.from?.id
         await handleHandoff(leadId, chatId, botToken, req.headers.host)
         if (botToken) {
           await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {

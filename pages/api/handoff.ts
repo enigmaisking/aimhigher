@@ -12,13 +12,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ ok: false, error: 'Method not allowed' })
   }
 
-  const { leadId, projectName, ticker, contractAddress, chain, targetIndividuals } = req.body as {
+  const { leadId, projectName, ticker, contractAddress, chain, targetIndividuals, socialLinks, userChatId } = req.body as {
     leadId: string
     projectName?: string
     ticker?: string
     contractAddress?: string
     chain?: string
     targetIndividuals?: TargetIndividual[]
+    socialLinks?: { twitter?: string | null; telegram?: string | null; website?: string | null; discord?: string | null }
+    userChatId?: string | number
   }
 
   if (!leadId) {
@@ -36,7 +38,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       contractAddress || '',
       chain || '',
       ticker || '',
+      socialLinks,
     )
+
+    // Ensure social links from scan data are used even if enrichWithSocialLinks
+    // had to fall back to API fetch (which may return empty results)
+    const mergedLinks = { ...(context.socialLinks || {}) }
+    if (socialLinks) {
+      if (socialLinks.twitter && !mergedLinks.twitter) mergedLinks.twitter = socialLinks.twitter
+      if (socialLinks.telegram && !mergedLinks.telegram) mergedLinks.telegram = socialLinks.telegram
+      if (socialLinks.website && !mergedLinks.website) mergedLinks.website = socialLinks.website
+      if (socialLinks.discord && !mergedLinks.discord) mergedLinks.discord = socialLinks.discord
+    }
+    context.socialLinks = mergedLinks
 
     const telegramChatId = process.env.TELEGRAM_CHAT_ID || ''
     const hasTelegram = !!(context.socialLinks?.telegram)
@@ -78,6 +92,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // No Telegram link — generate draft directly
     // If known founders/KOLs were provided as target individuals, 
     // include them in the draft so outreach targets their specific role
+    const hasOtherSocials = !!(context.socialLinks?.twitter || context.socialLinks?.website || context.socialLinks?.discord)
     console.log(`[Handoff] No Telegram link — generating draft${targetIndividuals?.length ? ` for ${targetIndividuals.length} known individuals` : ''}`)
     await updateEnrichmentStep(leadId, 'generating_draft')
 
@@ -94,16 +109,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const fullDraft = await generateFullDraft(leadId, draftInput)
-    await sendDraftForApproval(leadId, context.projectName, fullDraft.outreach, context.socialLinks, hasTelegram)
+    await sendDraftForApproval(leadId, context.projectName, fullDraft.outreach, context.socialLinks, hasTelegram, userChatId)
 
     console.log(`[Handoff] Draft sent for approval: ${context.projectName}`)
+
+    const noSocialMsg = hasOtherSocials
+      ? `Lead "${context.projectName}" has no Telegram link. Draft generated for outreach via other channels.`
+      : targetIndividuals?.length
+        ? `Lead "${context.projectName}" has no social links. Draft generated targeting ${targetIndividuals.length} known individual(s) for manual outreach.`
+        : `Lead "${context.projectName}" has no social links. No target individuals provided — basic draft sent for review. Add known founders/KOLs to personalize outreach.`
 
     return res.status(200).json({
       ok: true,
       data: {
-        message: targetIndividuals?.length
-          ? `Lead "${context.projectName}" has no social links. Draft generated targeting ${targetIndividuals.length} known individual(s) for manual outreach.`
-          : `Lead "${context.projectName}" has no social links. No target individuals provided — basic draft sent for review. Add known founders/KOLs to personalize outreach.`,
+        message: noSocialMsg,
         projectName: context.projectName,
         step: 'awaiting_approval',
         targetCount: targetIndividuals?.length || 0,

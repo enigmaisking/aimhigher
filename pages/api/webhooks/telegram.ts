@@ -12,12 +12,22 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next'
 
+interface ScanSession {
+  chatId: number | string
+  leads: any[]
+  page: number
+  pageSize: number
+  totalPages: number
+  leadMessageIds: number[]
+  navMessageId: number | null
+}
+
 // In-memory cache for scan results (lost on cold boot)
 const scanLeadCache = new Map<string, any>()
 
 const SCAN_CHAINS: Record<string, string[]> = {
-  all: ['eth', 'solana', 'bsc', 'base', 'avax', 'arbitrum', 'optimism', 'polygon-pos', 'fantom'],
-  evm: ['eth', 'bsc', 'base', 'avax', 'arbitrum', 'optimism', 'polygon-pos', 'fantom'],
+  all: ['solana', 'base', 'bsc', 'arbitrum', 'eth'],
+  evm: ['base', 'bsc', 'arbitrum', 'eth'],
   solana: ['solana'],
 }
 
@@ -45,6 +55,13 @@ async function handleHandoff(leadId: string, chatId: number | string, botToken: 
       ticker: lead.ticker?.replace('$', ''),
       contractAddress: lead.tokenAddress || '',
       chain: lead.chain,
+      userChatId: chatId,
+      socialLinks: {
+        twitter: lead.twitterHandle || null,
+        telegram: lead.telegramHandle || null,
+        website: lead.websiteUrl || null,
+        discord: lead.discordUrl || null,
+      },
     }),
   })
 
@@ -59,6 +76,106 @@ async function handleHandoff(leadId: string, chatId: number | string, botToken: 
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text: `❌ Handoff failed: ${json.error}`, parse_mode: 'Markdown' }),
     })
+  }
+}
+
+function formatSocialLink(label: string, handle: string | null): string | null {
+  if (!handle) return null
+  if (label === 'X') return `🐦 [X](${handle.startsWith('http') ? handle : `https://twitter.com/${handle}`})`
+  if (label === 'Telegram') return `✈️ [Telegram](${handle.startsWith('http') ? handle : `https://t.me/${handle}`})`
+  if (label === 'Website') return `🌐 [Website](${handle.startsWith('http') ? handle : `https://${handle}`})`
+  if (label === 'Discord') return `💬 [Discord](${handle.startsWith('http') ? handle : `https://discord.gg/${handle}`})`
+  return null
+}
+
+function formatLeadMessage(lead: any): string {
+  const socialLinks = [
+    formatSocialLink('X', lead.twitterHandle),
+    formatSocialLink('Telegram', lead.telegramHandle),
+    formatSocialLink('Website', lead.websiteUrl),
+    formatSocialLink('Discord', lead.discordUrl),
+  ].filter(Boolean).join(' · ')
+
+  return [
+    `*${lead.name}* (${lead.ticker})`,
+    `Chain: ${lead.chain} · Score: ${lead.score}/10`,
+    `Mcap: ${lead.mcap}`,
+    socialLinks || '',
+    `Contract: \`${lead.tokenAddress || 'N/A'}\``,
+  ].filter(Boolean).join('\n')
+}
+
+async function sendLeadsPage(session: ScanSession, botToken: string) {
+  const { chatId, leads, page, pageSize, totalPages } = session
+  const start = page * pageSize
+  const pageLeads = leads.slice(start, start + pageSize)
+
+  // Delete previous lead messages
+  for (const msgId of session.leadMessageIds) {
+    try {
+      await fetch(`https://api.telegram.org/bot${botToken}/deleteMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, message_id: msgId }),
+      })
+    } catch { /* ignore */ }
+  }
+  session.leadMessageIds = []
+
+  // Delete previous nav message
+  if (session.navMessageId) {
+    try {
+      await fetch(`https://api.telegram.org/bot${botToken}/deleteMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, message_id: session.navMessageId }),
+      })
+    } catch { /* ignore */ }
+    session.navMessageId = null
+  }
+
+  // Send lead messages for current page
+  for (const lead of pageLeads) {
+    const msg = formatLeadMessage(lead)
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: msg,
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '🔗 Start Outreach', callback_data: `handoff_${lead.id}` },
+          ]],
+        },
+      }),
+    })
+    const json = await res.json()
+    if (json.ok && json.result?.message_id) {
+      session.leadMessageIds.push(json.result.message_id)
+    }
+  }
+
+  // Build navigation buttons
+  const row: any[] = []
+  if (page > 0) {
+    row.push({ text: '◀️ Previous', callback_data: `scanpage_prev` })
+  }
+  row.push({ text: `📄 Page ${page + 1}/${totalPages}`, callback_data: 'scanpage_info' })
+  if (page < totalPages - 1) {
+    row.push({ text: 'Next ▶️', callback_data: `scanpage_next` })
+  }
+
+  const navRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: `✅ Found ${leads.length} leads total.`,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [row] },
+    }),
+  })
+  const navJson = await navRes.json()
+  if (navJson.ok && navJson.result?.message_id) {
+    session.navMessageId = navJson.result.message_id
   }
 }
 
@@ -106,49 +223,27 @@ async function runScan(chatId: number | string, preset: string, botToken: string
       return
     }
 
-    const topLeads = leads.slice(0, 5)
-    for (const lead of topLeads) {
+    // Cache all leads for handoff and pagination
+    for (const lead of leads) {
       scanLeadCache.set(lead.id, lead)
     }
 
-    for (const lead of topLeads) {
-      const socialLinks: string[] = []
-      if (lead.twitterHandle) socialLinks.push(`🐦 [X](${lead.twitterHandle.startsWith('http') ? lead.twitterHandle : `https://twitter.com/${lead.twitterHandle}`})`)
-      if (lead.telegramHandle) socialLinks.push(`✈️ [Telegram](${lead.telegramHandle.startsWith('http') ? lead.telegramHandle : `https://t.me/${lead.telegramHandle}`})`)
-      if (lead.websiteUrl) socialLinks.push(`🌐 [Website](${lead.websiteUrl.startsWith('http') ? lead.websiteUrl : `https://${lead.websiteUrl}`})`)
-      if (lead.discordUrl) socialLinks.push(`💬 [Discord](${lead.discordUrl.startsWith('http') ? lead.discordUrl : `https://discord.gg/${lead.discordUrl}`})`)
-
-      const msg = [
-        `*${lead.name}* (${lead.ticker})`,
-        `Chain: ${lead.chain} · Score: ${lead.score}/10`,
-        `Mcap: ${lead.mcap}`,
-        socialLinks.length > 0 ? socialLinks.join(' · ') : '',
-        `Contract: \`${lead.tokenAddress || 'N/A'}\``,
-      ].filter(Boolean).join('\n')
-
-      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: msg,
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [[
-              { text: '🔗 Start Outreach', callback_data: `handoff_${lead.id}` },
-            ]],
-          },
-        }),
-      })
+    const pageSize = 5
+    const totalPages = Math.ceil(leads.length / pageSize)
+    const session: ScanSession = {
+      chatId,
+      leads,
+      page: 0,
+      pageSize,
+      totalPages,
+      leadMessageIds: [],
+      navMessageId: null,
     }
 
-    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: `✅ Found ${leads.length} leads. ${leads.length > 5 ? `Showing top 5.` : ''}`,
-        parse_mode: 'Markdown',
-      }),
-    })
+    // Store session in cache (keyed by chatId so callbacks can find it)
+    scanLeadCache.set(`_scan_${chatId}`, session)
+
+    await sendLeadsPage(session, botToken)
   } catch (err: any) {
     await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -197,6 +292,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             body: JSON.stringify({ callback_query_id: cb.id, text: 'Outreach started!', show_alert: false }),
           })
         }
+        return res.status(200).json({ ok: true })
+      }
+
+      // Handle scan pagination (next/prev page)
+      if ((data === 'scanpage_next' || data === 'scanpage_prev') && botToken) {
+        const chatId = cb.message?.chat?.id || cb.from?.id
+        const sessionKey = `_scan_${chatId}`
+        const session: ScanSession | undefined = scanLeadCache.get(sessionKey)
+        if (session) {
+          if (data === 'scanpage_next' && session.page < session.totalPages - 1) {
+            session.page++
+          } else if (data === 'scanpage_prev' && session.page > 0) {
+            session.page--
+          }
+          scanLeadCache.set(sessionKey, session)
+          await sendLeadsPage(session, botToken)
+        }
+        await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callback_query_id: cb.id, text: 'Loading...', show_alert: false }),
+        })
         return res.status(200).json({ ok: true })
       }
 

@@ -228,7 +228,8 @@ export async function sendGroupJoinRequest(
 }
 
 /**
- * Send enrichment workflow step 4: Request HITL to review and approve draft
+ * Send enrichment workflow step 4: Request user to review and approve draft
+ * If userChatId is provided, sends to that user. Otherwise falls back to team chat.
  */
 export async function sendDraftForApproval(
   leadId: string,
@@ -236,6 +237,7 @@ export async function sendDraftForApproval(
   outreachDraft: string,
   socialLinks?: { twitter?: string | null; telegram?: string | null; discord?: string | null; website?: string | null },
   hasTelegram?: boolean,
+  userChatId?: string | number,
 ): Promise<{ ok: boolean; messageId?: number; error?: string }> {
   const links = socialLinks || {}
   const hasTg = hasTelegram || !!(links.telegram)
@@ -287,6 +289,10 @@ export async function sendDraftForApproval(
     ],
   ]
 
+  // Send to user if userChatId provided, otherwise fall back to team chat
+  if (userChatId) {
+    return sendMessageWithButtons(userChatId, message, buttons)
+  }
   return sendTeamMessageWithButtons(message, buttons)
 }
 

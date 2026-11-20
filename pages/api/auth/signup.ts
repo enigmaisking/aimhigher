@@ -7,7 +7,7 @@ export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse<ApiResponse>
 ) {
-  if (req.method !== 'POST') {
+  if (process.env.ALLOW_SIGNUP !== 'true') return res.status(404).json({ ok: false, error: 'Not found' })
     return res.status(405).json({ ok: false, error: 'Method not allowed' })
   }
 

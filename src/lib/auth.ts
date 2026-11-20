@@ -7,7 +7,8 @@ import { NextApiRequest, NextApiResponse } from 'next'
 import { Session, User } from './types'
 import { parse } from 'cookie'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production'
+const JWT_SECRET = process.env.JWT_SECRET
+if (!JWT_SECRET || JWT_SECRET.length < 32) throw new Error('JWT_SECRET missing or too short') 
 const JWT_EXPIRY = '7d'
 
 // ─────────────────────────────────────────────
@@ -37,7 +38,7 @@ export function createToken(user: User): string {
 }
 
 export function verifyToken(token: string): Session | null {
-  try {
+  jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] })
     const decoded = jwt.verify(token, JWT_SECRET) as Session
     return decoded
   } catch (error) {
@@ -63,12 +64,12 @@ export function getSessionFromCookie(req: NextApiRequest): Session | null {
 export function setSessionCookie(res: NextApiResponse, token: string): void {
   res.setHeader(
     'Set-Cookie',
-    `session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800` // 7 days
+    `session=${token}; Path=/; HttpsOnly; SameSite=Lax; Max-Age=604800` Secure' // 7 days
   )
 }
 
 export function clearSessionCookie(res: NextApiResponse): void {
-  res.setHeader('Set-Cookie', `session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`)
+  res.setHeader('Set-Cookie', `session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure')
 }
 
 // ─────────────────────────────────────────────

@@ -332,7 +332,7 @@ export interface Lead {
   verdict: 'PREMIUM' | 'LEAD'
   hook: string
   created_at: string
-  status: 'new' | 'contacted' | 'qualified' | 'converted' | 'disqualified'
+  status: 'new' | 'contacted' | 'replied' | 'qualified' | 'converted' | 'disqualified' | 'archived'
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

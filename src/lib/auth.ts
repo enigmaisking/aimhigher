@@ -7,8 +7,11 @@ import { NextApiRequest, NextApiResponse } from 'next'
 import { Session, User } from './types'
 import { parse } from 'cookie'
 
-const JWT_SECRET = process.env.JWT_SECRET
-if (!JWT_SECRET || JWT_SECRET.length < 32) throw new Error('JWT_SECRET missing or too short') 
+const JWT_SECRET = (() => {
+  const secret = process.env.JWT_SECRET
+  if (!secret || secret.length < 32) throw new Error('JWT_SECRET missing or too short')
+  return secret
+})()
 const JWT_EXPIRY = '7d'
 
 // ─────────────────────────────────────────────
@@ -38,8 +41,8 @@ export function createToken(user: User): string {
 }
 
 export function verifyToken(token: string): Session | null {
-  jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] })
-    const decoded = jwt.verify(token, JWT_SECRET) as Session
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as Session
     return decoded
   } catch (error) {
     return null
@@ -64,19 +67,19 @@ export function getSessionFromCookie(req: NextApiRequest): Session | null {
 export function setSessionCookie(res: NextApiResponse, token: string): void {
   res.setHeader(
     'Set-Cookie',
-    `session=${token}; Path=/; HttpsOnly; SameSite=Lax; Max-Age=604800` Secure' // 7 days
+    `session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800` // 7 days
   )
 }
 
 export function clearSessionCookie(res: NextApiResponse): void {
-  res.setHeader('Set-Cookie', `session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure')
+  res.setHeader('Set-Cookie', 'session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0')
 }
 
 // ─────────────────────────────────────────────
 // MIDDLEWARE
 // ─────────────────────────────────────────────
 
-type NextApiHandler = (req: NextApiRequest, res: NextApiResponse) => Promise<void> | void
+type NextApiHandler = (req: NextApiRequest, res: NextApiResponse) => Promise<unknown> | unknown
 
 export function withAuth(handler: NextApiHandler): NextApiHandler {
   return (req: NextApiRequest, res: NextApiResponse) => {

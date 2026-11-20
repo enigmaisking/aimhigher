@@ -1,4 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
+import { getSessionFromCookie } from '../../src/lib/auth'
+import { requireBearer } from '../../src/guards'
 
 interface TargetIndividual {
   name: string
@@ -11,6 +13,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'POST') {
     return res.status(405).json({ ok: false, error: 'Method not allowed' })
   }
+  if (!getSessionFromCookie(req) && !requireBearer(req, res, 'INTERNAL_API_KEY')) return
 
   const { leadId, projectName, ticker, contractAddress, chain, targetIndividuals, socialLinks, userChatId } = req.body as {
     leadId: string
@@ -25,6 +28,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (!leadId) {
     return res.status(400).json({ ok: false, error: 'leadId is required' })
+  }
+  if (userChatId !== undefined) {
+    const allowedIds = new Set((process.env.TELEGRAM_ALLOWED_USER_IDS || '').split(',').map((value) => value.trim()).filter(Boolean))
+    if (!allowedIds.size || !allowedIds.has(String(userChatId))) return res.status(403).json({ ok: false, error: 'Unauthorized chat' })
   }
 
   try {

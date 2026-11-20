@@ -15,10 +15,9 @@ async function handler(req: NextApiRequest, res: NextApiResponse<ApiResponse>) {
     return res.status(405).json({ ok: false, error: 'Method not allowed' })
   }
 
-  const { agent, messages, systemOverride } = req.body as {
+  const { agent, messages } = req.body as {
     agent: AgentType
     messages: Message[]
-    systemOverride?: string
   }
 
   // Validate input
@@ -41,7 +40,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse<ApiResponse>) {
   }
 
   try {
-    const systemPrompt = systemOverride || AGENT_PROMPTS[agent]
+    const systemPrompt = AGENT_PROMPTS[agent]
     if (!systemPrompt) {
       return res.status(400).json({
         ok: false,

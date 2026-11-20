@@ -4,6 +4,7 @@ const AIRTABLE_PAT = process.env.AIRTABLE_PAT
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID
 const AIRTABLE_LEADS_TABLE_ID = process.env.AIRTABLE_LEADS_TABLE_ID
 const AIRTABLE_USERS_TABLE_ID = process.env.AIRTABLE_USERS_TABLE_ID
+const escapeFormulaValue = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 
 // Map internal chain values to Airtable Single select labels
 const CHAIN_TO_AIRTABLE: Record<string, string> = {
@@ -69,11 +70,12 @@ const SKIP_FIELDS = new Set([
 
 export const airtableClient = {
   async getUserByEmail(email: string): Promise<User | null> {
-    if (!AIRTABLE_USERS_TABLE_ID) return null
+    if (!AIRTABLE_USERS_TABLE_ID) throw new Error('Users table ID not configured')
+    const safeEmail = escapeFormulaValue(email.trim().toLowerCase())
     try {
       const response = await fetchAirtable(
         'GET',
-        `/${AIRTABLE_USERS_TABLE_ID}?filterByFormula={email}="${email}"`
+        `/${AIRTABLE_USERS_TABLE_ID}?filterByFormula=${encodeURIComponent(`LOWER({email})="${safeEmail}"`)}&maxRecords=1`
       )
       const records = response.records || []
       if (records.length === 0) return null
@@ -88,7 +90,7 @@ export const airtableClient = {
       }
     } catch (err) {
       console.error('[Airtable] getUserByEmail error:', err)
-      return null
+      throw err
     }
   },
 
@@ -185,23 +187,24 @@ export const airtableClient = {
   },
 
   async getLeads(): Promise<any[]> {
-    if (!AIRTABLE_LEADS_TABLE_ID) return []
+    if (!AIRTABLE_LEADS_TABLE_ID) throw new Error('Leads table ID not configured')
     try {
       const response = await fetchAirtable('GET', `/${AIRTABLE_LEADS_TABLE_ID}`)
-      return response.records || []
+      return (response.records || []).filter((record: any) => record.fields?.status !== 'archived')
     } catch (err) {
       console.error('[Airtable] getLeads error:', err)
-      return []
+      throw err
     }
   },
 
   async findLeadByContract(contractAddress: string, chain?: string): Promise<{ id: string; fields: Record<string, any> } | null> {
-    if (!AIRTABLE_LEADS_TABLE_ID || !contractAddress) return null
+    if (!AIRTABLE_LEADS_TABLE_ID) throw new Error('Leads table ID not configured')
+    if (!contractAddress) return null
     try {
-      let formula = `{contract_address}="${contractAddress}"`
+      let formula = `{contract_address}="${escapeFormulaValue(contractAddress)}"`
       if (chain) {
         const mapped = CHAIN_TO_AIRTABLE[chain.toLowerCase().trim()] || chain
-        formula = `AND(${formula},{chain}="${mapped}")`
+        formula = `AND(${formula},{chain}="${escapeFormulaValue(mapped)}")`
       }
       const response = await fetchAirtable(
         'GET',
@@ -210,23 +213,24 @@ export const airtableClient = {
       return response.records?.[0] || null
     } catch (err) {
       console.warn('[Airtable] findLeadByContract error:', err)
-      return null
+      throw err
     }
   },
 
   async findLeadByNameChain(projectName: string, chain: string): Promise<{ id: string; fields: Record<string, any> } | null> {
-    if (!AIRTABLE_LEADS_TABLE_ID) return null
+    if (!AIRTABLE_LEADS_TABLE_ID) throw new Error('Leads table ID not configured')
     try {
-      const safeName = projectName.replace(/"/g, '\\"')
+      const safeName = escapeFormulaValue(projectName)
       const airtableChain = CHAIN_TO_AIRTABLE[chain.toLowerCase().trim()] || chain
+      const formula = `AND({project_name}="${safeName}",{chain}="${escapeFormulaValue(airtableChain)}")`
       const response = await fetchAirtable(
         'GET',
-        `/${AIRTABLE_LEADS_TABLE_ID}?filterByFormula=AND({project_name}="${safeName}",{chain}="${airtableChain}")&maxRecords=1`
+        `/${AIRTABLE_LEADS_TABLE_ID}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=1`
       )
       return response.records?.[0] || null
     } catch (err) {
       console.warn('[Airtable] findLeadByNameChain error:', err)
-      return null
+      throw err
     }
   },
 

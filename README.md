@@ -270,6 +270,10 @@ aimhigher-team/
 | `AIRTABLE_LEADS_TABLE_ID` | ✅       | Leads table ID                                            |
 | `AIRTABLE_USERS_TABLE_ID` | ✅       | Users table ID                                            |
 | `JWT_SECRET`              | ✅       | For signing JWT tokens (min 32 chars)                     |
+| `CRON_SECRET`             | ✅       | Bearer secret for scheduled scan and reminder endpoints  |
+| `INTERNAL_API_KEY`        | ✅       | Bearer secret for internal Scout and handoff calls        |
+| `TELEGRAM_WEBHOOK_SECRET` | ✅       | Same secret token registered with Telegram's webhook     |
+| `TELEGRAM_ALLOWED_USER_IDS` | ✅     | Comma-separated Telegram numeric user IDs allowed to scan and approve |
 | `XPOZ_API_KEY`            | Optional | For live Twitter search (Scout fallback works without it) |
 | `XPOZ_API_BASE`           | Optional | Xpoz API endpoint (default: https://mcp.xpoz.ai/mcp)      |
 | `NEXT_PUBLIC_APP_URL`     | Optional | Your deployed URL                                         |

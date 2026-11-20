@@ -11,6 +11,7 @@
 //   2. Run: curl -X POST https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://your-site.com/api/webhooks/telegram
 
 import type { NextApiRequest, NextApiResponse } from 'next'
+import { timingSafeEqual } from 'crypto'
 
 interface ScanSession {
   chatId: number | string
@@ -56,7 +57,7 @@ async function handleHandoff(leadId: string, _userId: number | string, sourceCha
       ticker: lead.ticker?.replace('$', ''),
       contractAddress: lead.tokenAddress || '',
       chain: lead.chain,
-      userChatId: sourceChatId,
+      userChatId: _userId,
       socialLinks: {
         twitter: lead.twitterHandle || null,
         telegram: lead.telegramHandle || null,
@@ -196,7 +197,7 @@ async function runScan(chatId: number | string, userId: number | string, preset:
   try {
     const scoutRes = await fetch(`${appUrl}/api/scout`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.INTERNAL_API_KEY || ''}` },
       body: JSON.stringify({
         chains,
         minimumScore: 5,
@@ -259,6 +260,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET
+  const got = req.headers['x-telegram-bot-api-secret-token']
+  const expectedBytes = Buffer.from(secret || '')
+  const gotBytes = Buffer.from(typeof got === 'string' ? got : '')
+  if (!secret || typeof got !== 'string' || expectedBytes.length !== gotBytes.length || !timingSafeEqual(expectedBytes, gotBytes)) {
+    return res.status(401).json({ ok: false, error: 'Unauthorized' })
+  }
+  const allowedIds = new Set((process.env.TELEGRAM_ALLOWED_USER_IDS || '').split(',').map((id) => id.trim()).filter(Boolean))
+  const isAllowed = (id: number | string | undefined) => !!id && allowedIds.has(String(id))
+
   try {
     const body = req.body
 
@@ -267,6 +278,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const cb = body.callback_query
       const data = cb.data || ''
       const botToken = process.env.TELEGRAM_BOT_TOKEN
+
+      if (!allowedIds.size || !isAllowed(cb.from?.id) || (cb.message?.chat?.id !== undefined && String(cb.message.chat.id) !== process.env.TELEGRAM_CHAT_ID)) {
+        return res.status(200).json({ ok: true })
+      }
 
       console.log(`[Telegram Webhook] Callback: ${data} from user ${cb.from?.id}`)
 
@@ -292,7 +307,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         
         console.log(`[Webhook] Handoff: leadId=${leadId}, sourceChatId=${sourceChatId}, from=${cb.from?.id}, chatType=${cb.message?.chat?.type}`)
         
-        await handleHandoff(leadId, sourceChatId, sourceChatId, botToken, req.headers.host)
+        await handleHandoff(leadId, cb.from.id, sourceChatId, botToken, req.headers.host)
         if (botToken) {
           await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -352,6 +367,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const chatId = message.chat?.id
     const text = message.text || message.caption || ''
+
+    if (text.startsWith('/scan') && (!allowedIds.size || !isAllowed(message.from?.id))) {
+      return res.status(200).json({ ok: true })
+    }
 
     if (!chatId || !text) {
       return res.status(200).json({ ok: true })

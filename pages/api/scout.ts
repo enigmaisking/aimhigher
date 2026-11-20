@@ -1,4 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
+import { getSessionFromCookie } from '../../src/lib/auth'
+import { requireBearer } from '../../src/guards'
+import { CHAINS, resolveChain } from '../../src/chain'
 
 const GECKO_BASE = 'https://api.geckoterminal.com/api/v2'
 
@@ -320,9 +323,9 @@ async function fetchDexScreenerProjects(): Promise<Project[]> {
   }
 }
 
-let geckoRateLimited = false
+interface GeckoScanState { rateLimited: boolean }
 
-async function fetchGeckoPools(chain: string, endpoint: string): Promise<Project[]> {
+async function fetchGeckoPools(chain: string, endpoint: string, state: GeckoScanState): Promise<Project[]> {
   const projects: Project[] = []
   const geckoChain = normalizeChain(chain)
   const url = `${GECKO_BASE}/networks/${geckoChain}/${endpoint}?limit=50&include=base_token`
@@ -339,7 +342,7 @@ async function fetchGeckoPools(chain: string, endpoint: string): Promise<Project
       await sleep(backoff)
       continue
     }
-    if (response.status === 429) geckoRateLimited = true
+    if (response.status === 429) state.rateLimited = true
     console.warn(`[Scout] ${geckoChain}/${endpoint}: ${response.status}`)
     return projects
   }
@@ -397,13 +400,14 @@ async function fetchGeckoPools(chain: string, endpoint: string): Promise<Project
 async function gatherGeckoSignals(chains: string[]): Promise<Project[]> {
   const seen = new Set<string>()
   const projects: Project[] = []
+  const state: GeckoScanState = { rateLimited: false }
   const endpoints = ['trending_pools', 'new_pools']
 
   for (const chain of chains) {
     for (const endpoint of endpoints) {
       try {
         await sleepJitter(SCOUT_CONFIG.RATE_LIMIT_DELAY)
-        const batch = await fetchGeckoPools(chain, endpoint)
+        const batch = await fetchGeckoPools(chain, endpoint, state)
         for (const p of batch) {
           const key = `${p.ticker}-${p.chain}`.toLowerCase()
           if (!seen.has(key)) {
@@ -418,7 +422,7 @@ async function gatherGeckoSignals(chains: string[]): Promise<Project[]> {
   }
 
   // Fall back to DexScreener if GeckoTerminal was rate-limited
-  if (geckoRateLimited && projects.length < 3) {
+  if (state.rateLimited && projects.length < 3) {
     console.log('[Scout] GeckoTerminal rate-limited, falling back to DexScreener token profiles')
     const dexProjects = await fetchDexScreenerProjects()
     for (const p of dexProjects) {
@@ -513,6 +517,7 @@ async function scrapeWebsiteForSocialLinks(websiteUrl: string): Promise<ScrapedS
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' })
+  if (!getSessionFromCookie(req) && !requireBearer(req, res, 'INTERNAL_API_KEY')) return
 
   const {
     chains = DEFAULT_CHAINS,
@@ -532,8 +537,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     manualSignals?: string[]
   }
 
-  geckoRateLimited = false
-  const liveProjects = await gatherGeckoSignals(chains.length ? chains : DEFAULT_CHAINS)
+  if (!Array.isArray(chains) || chains.length > 9 || !Array.isArray(manualSignals) || manualSignals.length > 20) {
+    return res.status(400).json({ ok: false, error: 'Invalid scan inputs' })
+  }
+  if (!Number.isFinite(minimumScore) || minimumScore < 0 || minimumScore > 10 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 50) {
+    return res.status(400).json({ ok: false, error: 'Invalid score or page size' })
+  }
+  let normalizedChains: string[]
+  try {
+    normalizedChains = chains.map((chain) => CHAINS[resolveChain(chain)].gecko)
+  } catch {
+    return res.status(400).json({ ok: false, error: 'Unknown chain' })
+  }
+
+  const liveProjects = await gatherGeckoSignals(normalizedChains.length ? normalizedChains : DEFAULT_CHAINS)
 
   // Only scrape websites for projects missing ALL social links
   // Projects that already have X, Telegram, or Discord skip scraping entirely
@@ -577,7 +594,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         chain: project.chain,
         vertical,
         score: scoreBreakdown.total,
-        verdict: scoreBreakdown.total >= 8.5 ? 'PREMIUM' : 'LEAD',
+        verdict: scoreBreakdown.total >= 8.3 ? 'PREMIUM' : 'LEAD',
         stage: 'Scouted',
         mcap: formatUsd(project.mcap),
         treasury: formatUsd(project.reserve),

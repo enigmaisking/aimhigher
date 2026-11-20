@@ -17,13 +17,11 @@ export default async function handler(
   const { email, password } = req.body
 
   // Validate input
-  if (!email || !password) {
+  if (typeof email !== 'string' || typeof password !== 'string') {
     return res.status(400).json({ ok: false, error: 'Email and password required' })
   }
 
-  if (typeof email !== 'string' || typeof password !== 'string') {
-    return res.status(400).json({ ok: false, error: 'Invalid input format' })
-  }
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ ok: false, error: 'Invalid email address' })
 
   try {
     // Find user by email

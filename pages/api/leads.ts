@@ -97,16 +97,20 @@ async function handler(req: NextApiRequest, res: NextApiResponse<ApiResponse>) {
       const safeUpdates: Record<string, unknown> = {}
       if (status !== undefined) safeUpdates.status = status
       if (notes !== undefined) safeUpdates.notes = notes
-      if (hook !== undefined) safeUpdates.status = hook
-      if (contact_handle !== undefined) safeUpdates.status = contact_handle
-      if (why_good_fit !== undefined) safeUpdates.status = why_good_fit
-      if (pain_point !== undefined) safeUpdates.status = pain_point
-      if (fit_score !== undefined) safeUpdates.status = fit_score
-      if (verdict !== undefined) safeUpdates.status = verdict
+      if (hook !== undefined) safeUpdates.hook = hook
+      if (contact_handle !== undefined) safeUpdates.contact_handle = contact_handle
+      if (why_good_fit !== undefined) safeUpdates.why_good_fit = why_good_fit
+      if (pain_point !== undefined) safeUpdates.pain_point = pain_point
+      if (fit_score !== undefined) safeUpdates.fit_score = fit_score
+      if (verdict !== undefined) safeUpdates.verdict = verdict
+      if (status !== undefined && !['new', 'contacted', 'replied', 'qualified', 'archived'].includes(status)) {
+        return res.status(400).json({ ok: false, error: 'Invalid lead status' })
+      }
+      if (fit_score !== undefined && (typeof fit_score !== 'number' || fit_score < 0 || fit_score > 10)) {
+        return res.status(400).json({ ok: false, error: 'fit_score must be a number between 0 and 10' })
+      }
 
-      safeUpdates.updated_by = session.email
-      
-      await airtableClient.updateLead(id, safeUpdates as partial<Lead>)
+      await airtableClient.updateLead(id, safeUpdates as Partial<Lead>)
 
       console.log(`[CRM] Lead updated: ${id} by ${session.email}`)
 
@@ -135,13 +139,11 @@ async function handler(req: NextApiRequest, res: NextApiResponse<ApiResponse>) {
         })
       }
 
-      await airtableClient.deleteLead(id)
-
-      console.log(`[CRM] Lead deleted: ${id} by ${session.email}`)
+      await airtableClient.updateLead(id, { status: 'archived' })
 
       return res.status(200).json({
         ok: true,
-        data: { message: 'Lead deleted' },
+        data: { message: 'Lead archived' },
       })
     } catch (error: any) {
       console.error('[Leads DELETE Error]', error)

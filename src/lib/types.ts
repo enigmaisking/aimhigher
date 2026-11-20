@@ -43,7 +43,7 @@ export interface Lead {
   score_breakdown: ScoreBreakdown
   verdict: 'PREMIUM' | 'LEAD'
   hook: string
-  status: 'new' | 'contacted' | 'qualified' | 'converted' | 'disqualified'
+  status: 'new' | 'contacted' | 'replied' | 'qualified' | 'converted' | 'disqualified' | 'archived'
   notes?: string
   created_by: string // user email
   created_at: string

@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
+import { withAuth } from '../../src/lib/auth'
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ ok: false, error: 'Method not allowed' })
   }
@@ -14,6 +15,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!chatId) {
     return res.status(400).json({ ok: false, error: 'TELEGRAM_CHAT_ID not set in .env.local' })
   }
+  const secretToken = process.env.TELEGRAM_WEBHOOK_SECRET
+  if (!secretToken) return res.status(503).json({ ok: false, error: 'TELEGRAM_WEBHOOK_SECRET is not configured' })
 
   const results: { step: string; ok: boolean; detail?: string }[] = []
 
@@ -34,7 +37,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   // Step 2: Determine the public webhook URL
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || (req.headers.host ? `https://${req.headers.host}` : null)
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL
   if (!appUrl) {
     results.push({ step: 'resolve_url', ok: false, detail: 'Cannot determine app URL. Set NEXT_PUBLIC_APP_URL in .env.local' })
     return res.status(200).json({ ok: false, results })
@@ -47,7 +50,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const whRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: webhookUrl }),
+      body: JSON.stringify({ url: webhookUrl, secret_token: secretToken, allowed_updates: ['message', 'callback_query'] }),
     })
     const whData = await whRes.json()
     if (whData.ok) {
@@ -98,3 +101,5 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const allOk = results.every(r => r.ok)
   return res.status(200).json({ ok: allOk, results })
 }
+
+export default withAuth(handler)

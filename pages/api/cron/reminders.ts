@@ -1,10 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
+import { requireBearer } from '../../../src/guards'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const cronSecret = process.env.CRON_SECRET
-   if (!requireBearer(req, res, 'CRON_SECRET'))return
-    return res.status(401).json({ ok: false, error: 'Unauthorized' })
-  }
+  if (!requireBearer(req, res, 'CRON_SECRET')) return
 
   try {
     const { processReminderQueue } = await import('../../../src/lib/autonomy/reminder-scheduler')

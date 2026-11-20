@@ -14,13 +14,11 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { airtableClient } from '../../../src/lib/airtable-client'
+import { requireBearer } from '../../../src/guards'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // ─── Auth guard (prevents unauthorized triggers) ──────────────────────────
-  const cronSecret = process.env.CRON_SECRET
-  if (!requireBearer(req, res, 'CRON_SECRET'))return
-    return res.status(401).json({ ok: false, error: 'Unauthorized' })
-  }
+  if (!requireBearer(req, res, 'CRON_SECRET')) return
 
   try {
     // Step 1: Run the Scout scan (reuse existing logic)
@@ -31,10 +29,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
     const scoutResponse = await fetch(`${appUrl}/api/scout`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.INTERNAL_API_KEY || ''}` },
       body: JSON.stringify({
         chains,
-        minimumScore: 8.5,
+        minimumScore: 8.3,
         pageSize: 20,
         manualSignals: [],
       }),
@@ -55,11 +53,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     for (const lead of leads) {
       try {
+        const contractAddress = lead.tokenAddress || lead.contract_address || ''
+        const existing = contractAddress
+          ? await airtableClient.findLeadByContract(contractAddress, lead.chain)
+          : await airtableClient.findLeadByNameChain(lead.name || lead.project_name || '', lead.chain)
+        if (existing) continue
         const airtableRecord = await airtableClient.createLead({
           project_name: lead.name || lead.project_name,
           token_ticker: (lead.ticker || lead.token_ticker || '').replace('$', ''),
           chain: lead.chain,
-          contract_address: lead.tokenAddress || lead.contract_address || '',
+          contract_address: contractAddress,
           estimated_mcap: lead.mcap || lead.estimated_mcap || '',
           why_good_fit: lead.why_good_fit || '',
           pain_point: lead.painPoint || lead.pain_point || '',

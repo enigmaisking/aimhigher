@@ -18,7 +18,7 @@ import { airtableClient } from '../../../src/lib/airtable-client'
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // ─── Auth guard (prevents unauthorized triggers) ──────────────────────────
   const cronSecret = process.env.CRON_SECRET
-  if (cronSecret && req.headers.authorization !== `Bearer ${cronSecret}`) {
+  if (!requireBearer(req, res, 'CRON_SECRET'))return
     return res.status(401).json({ ok: false, error: 'Unauthorized' })
   }
 

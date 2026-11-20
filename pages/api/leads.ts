@@ -76,7 +76,16 @@ async function handler(req: NextApiRequest, res: NextApiResponse<ApiResponse>) {
   // PATCH /api/leads — Update a lead
   if (req.method === 'PATCH') {
     try {
-      const { id, ...updates } = req.body
+      const { id,
+             status,
+             notes,
+             hook,
+             contact_handle,
+             why_good_fit,
+             pain_point,
+             fit_score,
+             verdict,
+            } = req.body
 
       if (!id) {
         return res.status(400).json({
@@ -85,7 +94,19 @@ async function handler(req: NextApiRequest, res: NextApiResponse<ApiResponse>) {
         })
       }
 
-      await airtableClient.updateLead(id, updates)
+      const safeUpdates: Record<string, unknown> = {}
+      if (status !== undefined) safeUpdates.status = status
+      if (notes !== undefined) safeUpdates.notes = notes
+      if (hook !== undefined) safeUpdates.status = hook
+      if (contact_handle !== undefined) safeUpdates.status = contact_handle
+      if (why_good_fit !== undefined) safeUpdates.status = why_good_fit
+      if (pain_point !== undefined) safeUpdates.status = pain_point
+      if (fit_score !== undefined) safeUpdates.status = fit_score
+      if (verdict !== undefined) safeUpdates.status = verdict
+
+      safeUpdates.updated_by = session.email
+      
+      await airtableClient.updateLead(id, safeUpdates as partial<Lead>)
 
       console.log(`[CRM] Lead updated: ${id} by ${session.email}`)
 

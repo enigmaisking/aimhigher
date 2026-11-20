@@ -225,12 +225,7 @@ export default function HomePage() {
     setLoginError('')
     if (!email.includes('@')) return setLoginError('Enter a valid email address.')
     if (password.length < 6) return setLoginError('Password must be at least 6 characters.')
-    if (isSignup && !signupName.trim()) return setLoginError('Enter your name.')
-
-    try {
-      const endpoint = isSignup ? '/api/auth/signup' : '/api/auth/login'
-      const body = isSignup ? { email, password, name: signupName.trim() } : { email, password }
-      const res = await fetch(endpoint, {
+    
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -490,7 +485,7 @@ export default function HomePage() {
                 </>
               )}
               <label className="block text-sm font-semibold text-white/70 mt-5" htmlFor="email">Email</label>
-              <input id="email" type="text" inputMode="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@aimhigher.gg" className="mt-2 w-full rounded-xl border border-white/15 bg-black px-4 py-4 text-white outline-none transition focus:border-[#6cff7f]" />
+            
               <label className="mt-5 block text-sm font-semibold text-white/70" htmlFor="password">Password</label>
               <div className="mt-2 flex rounded-xl border border-white/15 bg-black focus-within:border-[#6cff7f]">
                 <input id="password" type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Minimum 6 characters" className="min-w-0 flex-1 rounded-xl border-0 bg-transparent px-4 py-4 text-white outline-none" />

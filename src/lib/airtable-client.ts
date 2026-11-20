@@ -10,15 +10,20 @@ const CHAIN_TO_AIRTABLE: Record<string, string> = {
   eth: 'Ethereum',
   ethereum: 'Ethereum',
   solana: 'Solana',
+  sol: 'Solana',
   bsc: 'BNB',
   bnb: 'BNB',
   base: 'Base',
   avax: 'AVAX',
   avalanche: 'AVAX',
+  arb: 'Arbitrum',
   arbitrum: 'Arbitrum',
   'polygon-pos': 'Polygon',
   polygon: 'Polygon',
+  matic: 'Polygon',
   optimism: 'Optimism',
+  op: 'Optimism',
+  ftm: 'Fantom',
   fantom: 'Fantom',
 }
 
@@ -129,6 +134,14 @@ export const airtableClient = {
       status: 'status',
       created_by: 'created_by',
       notes: 'notes',
+      //Social & Contact fields
+      telegramHandle: 'telegram_handle',
+      telegram_Handle: 'telegram_handle',
+      websiteUrl: 'website_url',
+      website_url: 'website_url',
+      discordUrl: 'discord_url',
+      discord_url: 'discord_url',
+      email: 'email'
     }
 
     Object.entries(fieldMap).forEach(([key, airtableField]) => {
